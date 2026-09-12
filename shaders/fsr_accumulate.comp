@@ -1,0 +1,306 @@
+#version 460 core
+
+// M5, pass 2: reproject & accumulate, the full version.
+//
+// Same three jobs as `taau.comp` -- reproject, accumulate, rectify -- with the
+// parts M4 deliberately left out:
+//
+//   * the motion vector is the **dilated** one, and it arrives with a
+//     disocclusion factor computed from depth (`fsr_dilate.comp`), so history
+//     that belongs to a surface which was hidden last frame is dropped on
+//     evidence instead of being left to the colour clamp to notice;
+//   * reconstruction uses **Lanczos-2** over 4x4 render taps rather than a
+//     Gaussian over 3x3. The negative lobes are the point: they are what lets
+//     the reconstruction resolve a frequency instead of averaging it away;
+//   * the **reactive mask** raises the weight of the current frame where the
+//     G-buffer says history cannot be trusted (transparency, particles).
+//
+// `taau.comp` stays as it is. It is the ablation baseline the table compares
+// against, and sharing code between the two would make every row of that table
+// a claim about a #ifdef rather than about an algorithm.
+//
+// Everything is display-referred [0,1]; the tone map ran before this pass.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uInput;     // render res, current frame
+layout(binding = 1) uniform sampler2D uHistory;   // display res, rgb + weight in .a
+layout(binding = 2) uniform sampler2D uDilated;   // render res, xy = mv, z = disocclusion
+layout(binding = 3) uniform sampler2D uReactive;  // render res, 0 = trust history
+layout(binding = 4) uniform sampler2D uNewLocks;     // render res, 1 = thin feature here
+layout(binding = 5) uniform sampler2D uLockHistory;  // display res, x = life, y = luma
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+layout(rg16f, binding = 1) uniform writeonly image2D uLockOutput;
+
+uniform vec2 uInputSize;
+uniform vec2 uInvInputSize;
+uniform vec2 uOutputSize;
+uniform vec2 uInvOutputSize;
+uniform vec2 uJitter;
+uniform float uMaxWeight;
+uniform int uReset;
+uniform float uClampGamma;
+uniform float uMotionDecay;
+// Radial scale of the Lanczos kernel, in inverse render pixels. 1 is the
+// textbook support of two render pixels; above 1 the kernel narrows.
+//
+// Two values, blended by the same motion term that sets the accumulation
+// length, because they answer the same question. Kernel width trades the
+// sharpness of one frame against its noise, and that noise is only harmless
+// while there are enough frames to average it away. Standing still there are
+// eight, so the kernel can be narrow and every frame can be noisy; moving
+// fast there is effectively one, and a narrow kernel has nothing to hide
+// behind. Measured on Sponza: the still optimum is 2.0 and the 30 fps optimum
+// is 1.0, a difference of 0.9 dB in each direction if the wrong one is used.
+uniform float uLanczosScale;       // while the image is moving
+uniform float uLanczosScaleStill;  // with a still camera
+// 0 disables the depth-based rejection and leaves only the colour clamp, which
+// is the M4 behaviour and the row this pass has to beat.
+uniform float uDisocclusionStrength;
+// How many frames a lock survives. Long enough for the jitter sequence to come
+// back round to the phase that sampled the feature; 0 disables locking.
+uniform float uLockLife;
+// How far the clamp box is widened on a locked pixel, as a multiple of the
+// unlocked width. 1 means locking has no effect on the clamp.
+uniform float uLockRelax;
+// Luminance change that invalidates a lock, in display-referred units. A lock
+// protects a feature from the clamp, so it has to be given up the moment the
+// feature it was created for is no longer the thing under the pixel.
+uniform float uLockTolerance;
+
+vec3 rgbToYCoCg(vec3 c) {
+    return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b,
+                0.5 * c.r - 0.5 * c.b,
+                -0.25 * c.r + 0.5 * c.g - 0.25 * c.b);
+}
+
+vec3 yCoCgToRgb(vec3 c) {
+    return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z);
+}
+
+// Walks `history` along the line towards the centre of the box until it is
+// inside, rather than snapping each axis independently -- per-axis clamping in
+// RGB shifts hue, which on stone-and-grout floors reads as magenta fringing.
+vec3 clipToBox(vec3 history, vec3 lo, vec3 hi) {
+    const vec3 center = 0.5 * (hi + lo);
+    const vec3 extent = 0.5 * (hi - lo) + 1e-6;
+    const vec3 d = history - center;
+    const vec3 unit = abs(d / extent);
+    const float maxUnit = max(max(unit.x, unit.y), unit.z);
+    return maxUnit > 1.0 ? center + d / maxUnit : history;
+}
+
+// Lanczos-2 evaluated from the squared distance, using the polynomial FSR1/FSR2
+// use in place of two sinc calls. Exact enough that the difference never
+// reaches the output, and it avoids a transcendental per tap per pixel.
+float lanczos2Sq(float x2) {
+    x2 = min(x2, 4.0);
+    const float a = (2.0 / 5.0) * x2 - 1.0;
+    const float b = (1.0 / 4.0) * x2 - 1.0;
+    return ((25.0 / 16.0) * a * a - (25.0 / 16.0 - 1.0)) * (b * b);
+}
+
+// Catmull-Rom history resample, nine bilinear fetches (the standard 3x3
+// factorisation of the 4x4 kernel). Bilinear loses a measurable amount of
+// detail per frame and, fed back at ~90% per frame, converges to mush.
+vec4 sampleHistory(vec2 uv) {
+    vec2 samplePos = uv * uOutputSize;
+    vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
+    vec2 f = samplePos - texPos1;
+
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+
+    vec2 w12 = w1 + w2;
+    vec2 offset12 = w2 / max(w12, vec2(1e-5));
+
+    vec2 p0 = (texPos1 - 1.0) * uInvOutputSize;
+    vec2 p3 = (texPos1 + 2.0) * uInvOutputSize;
+    vec2 p12 = (texPos1 + offset12) * uInvOutputSize;
+
+    vec4 r = vec4(0.0);
+    r += texture(uHistory, vec2(p0.x,  p0.y))  * (w0.x  * w0.y);
+    r += texture(uHistory, vec2(p12.x, p0.y))  * (w12.x * w0.y);
+    r += texture(uHistory, vec2(p3.x,  p0.y))  * (w3.x  * w0.y);
+    r += texture(uHistory, vec2(p0.x,  p12.y)) * (w0.x  * w12.y);
+    r += texture(uHistory, vec2(p12.x, p12.y)) * (w12.x * w12.y);
+    r += texture(uHistory, vec2(p3.x,  p12.y)) * (w3.x  * w12.y);
+    r += texture(uHistory, vec2(p0.x,  p3.y))  * (w0.x  * w3.y);
+    r += texture(uHistory, vec2(p12.x, p3.y))  * (w12.x * w3.y);
+    r += texture(uHistory, vec2(p3.x,  p3.y))  * (w3.x  * w3.y);
+    return r;
+}
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 outSize = ivec2(uOutputSize);
+    if (any(greaterThanEqual(pos, outSize))) return;
+
+    const vec2 outUV = (vec2(pos) + 0.5) * uInvOutputSize;
+
+    // The frame was drawn with the projection shifted by uJitter render pixels,
+    // so render texel i shows the scene as it would appear at i - uJitter.
+    // Adding the jitter back is what makes the per-frame offset information
+    // rather than noise.
+    const vec2 srcF = outUV * uInputSize - 0.5;
+    const vec2 samplePos = srcF + uJitter;
+    const ivec2 maxTap = ivec2(uInputSize) - 1;
+    const ivec2 base = ivec2(floor(samplePos + 0.5));
+
+    // Dilated motion vector and the depth verdict that came with it. Fetched,
+    // never filtered: bilinear across a silhouette blends a moving object's
+    // vector with the background's and lands the history where neither was.
+    const vec4 dilated = texelFetch(uDilated, clamp(base, ivec2(0), maxTap), 0);
+    const vec2 mv = dilated.xy;
+    const float disocclusion = dilated.z * uDisocclusionStrength;
+    const float reactive = texelFetch(uReactive, clamp(base, ivec2(0), maxTap), 0).r;
+    const vec2 prevUV = outUV + mv;
+
+    // How much of the still-camera behaviour this pixel is entitled to. Drives
+    // both the accumulation cap and the reconstruction kernel width.
+    const float mvPixels = length(mv * uOutputSize);
+    const float stillness = exp(-uMotionDecay * mvPixels);
+    const float lanczosScale = mix(uLanczosScale, uLanczosScaleStill, stillness);
+
+    // Reconstruction over the 4x4 render taps the Lanczos-2 support covers.
+    // Coordinates are texel-centre indices: texel i has its centre at i, so the
+    // window is floor(samplePos) - 1 .. + 2 and the distance to a tap is simply
+    // the index difference.
+    //
+    // The 3x3 statistics window below is contained in this one -- `base` is
+    // `lanczosBase` or `lanczosBase + 1` on each axis -- so the two loops can
+    // be fused into 16 fetches instead of 25. Measured on an RX 580 that is
+    // *slower*: 0.95 ms against 0.68 ms at 1080p. The membership test is not
+    // loop-invariant (it depends on a per-pixel offset), which costs the
+    // compiler the fully unrolled constant-offset fetch pattern, and nine
+    // extra cached texel reads are cheaper than losing it. Fewer memory
+    // operations is not the same thing as faster.
+    const ivec2 lanczosBase = ivec2(floor(samplePos));
+    vec3 cur = vec3(0.0);
+    float kernelSum = 0.0;
+    float nearest2 = 1e30;
+    vec3 rgbMin = vec3(1e30);
+    vec3 rgbMax = vec3(-1e30);
+    for (int y = -1; y <= 2; ++y) {
+        for (int x = -1; x <= 2; ++x) {
+            const ivec2 tap = lanczosBase + ivec2(x, y);
+            const vec3 c = texelFetch(uInput, clamp(tap, ivec2(0), maxTap), 0).rgb;
+
+            const vec2 d = vec2(tap) - samplePos;
+            const float d2 = dot(d, d) * lanczosScale;
+            nearest2 = min(nearest2, d2);
+
+            const float w = lanczos2Sq(d2);
+            cur += c * w;
+            kernelSum += w;
+            rgbMin = min(rgbMin, c);
+            rgbMax = max(rgbMax, c);
+        }
+    }
+    // Lanczos has negative lobes, so the sum can approach zero on a lone bright
+    // tap and the division rings hard. Clamping back into the window's own
+    // range is cheaper and more stable than normalising by a sum that is
+    // allowed to change sign.
+    cur = kernelSum > 1e-3 ? cur / kernelSum : cur;
+    cur = clamp(cur, rgbMin, rgbMax);
+
+    // Rectification statistics from the 3x3 around the *nearest* render texel,
+    // in YCoCg: hard bounds plus the first two moments the variance clip is
+    // built from. Same window as taau.comp on purpose -- the ablation row
+    // comparing the two has to isolate the reconstruction kernel, not move the
+    // clamp underneath it as well.
+    vec3 nMin = vec3(1e30);
+    vec3 nMax = vec3(-1e30);
+    vec3 m1 = vec3(0.0);
+    vec3 m2 = vec3(0.0);
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            const vec3 cy = rgbToYCoCg(
+                texelFetch(uInput, clamp(base + ivec2(x, y), ivec2(0), maxTap), 0).rgb);
+            nMin = min(nMin, cy);
+            nMax = max(nMax, cy);
+            m1 += cy;
+            m2 += cy * cy;
+        }
+    }
+
+    // How well the current frame covers this display pixel. At 2x most pixels
+    // have no sample near them on a given frame; weighting by coverage lets the
+    // well-sampled frames carry the result instead of every frame contributing
+    // equally.
+    const float coverage = clamp(lanczos2Sq(nearest2), 0.0, 1.0);
+
+    // Motion-adaptive accumulation length: any interpolating resample has a
+    // zero at Nyquist at half-pixel phase, and feeding that back at ~90% per
+    // frame turns a per-frame loss into a steady-state one. Shortening the
+    // history where the image moves fast spends exactly the frames that were
+    // costing detail. See docs/TAAU.md for the derivation.
+    const float maxWeight = mix(1.0, uMaxWeight, stillness);
+
+    vec4 history = sampleHistory(prevUV);
+    float historyWeight = clamp(history.a, 0.0, maxWeight);
+    const bool offscreen = any(lessThan(prevUV, vec2(0.0))) || any(greaterThan(prevUV, vec2(1.0)));
+    if (uReset != 0 || offscreen) historyWeight = 0.0;
+
+    // Depth says this surface was not visible last frame, so whatever the
+    // history holds belongs to something else. This is the disocclusion
+    // handling the colour clamp cannot do: a newly revealed surface often has a
+    // colour that sits comfortably inside the occluder's neighbourhood, and the
+    // clamp lets it straight through as a smear.
+    historyWeight *= 1.0 - disocclusion;
+    // Reactive surfaces (transparency, particles) change for reasons no motion
+    // vector describes, so the current frame has to dominate there.
+    historyWeight *= 1.0 - reactive;
+
+    // Lock state. Reprojected with nearest sampling on purpose: a lock is a
+    // per-pixel token saying "there is a one-pixel feature here", and a
+    // bilinear blend of two such tokens is a statement about nothing.
+    const ivec2 prevPos = ivec2(floor(prevUV * uOutputSize));
+    const vec2 lockPrev =
+        (uReset != 0 || offscreen)
+            ? vec2(0.0)
+            : texelFetch(uLockHistory, clamp(prevPos, ivec2(0), outSize - 1), 0).rg;
+    const float curLuma = dot(cur, vec3(0.2126, 0.7152, 0.0722));
+
+    float lockLife = lockPrev.x;
+    float lockLuma = lockPrev.y;
+    // A disoccluded pixel is looking at a different surface, so whatever it was
+    // locked onto is gone; so is a pixel whose luminance no longer matches the
+    // feature the lock was created for. Without the second test a lock that
+    // drifts onto a background keeps the clamp open there and the ghost it was
+    // meant to prevent walks straight through.
+    if (disocclusion > 0.5 || abs(curLuma - lockLuma) > uLockTolerance) lockLife = 0.0;
+    lockLife = max(lockLife - 1.0, 0.0);
+
+    if (texelFetch(uNewLocks, clamp(base, ivec2(0), maxTap), 0).r > 0.5) {
+        lockLife = uLockLife;
+        lockLuma = curLuma;
+    }
+    const float lock = uLockLife > 0.0 ? clamp(lockLife / uLockLife, 0.0, 1.0) : 0.0;
+
+    // Rectify, then blend. Clamping first matters: history that is stale but
+    // still inside the current neighbourhood is usable information, and
+    // discarding it costs exactly the resolution this pass exists to recover.
+    // The box is the neighbourhood mean +/- uClampGamma standard deviations,
+    // intersected with its hard min/max -- the min/max alone is set by the two
+    // most extreme of nine taps, so one bright speck widens it enough to let a
+    // whole frame of stale colour through.
+    const vec3 mu = m1 * (1.0 / 9.0);
+    const vec3 sigma = sqrt(max(m2 * (1.0 / 9.0) - mu * mu, vec3(0.0)));
+    // A locked pixel gets a wider box, and loses the intersection with the hard
+    // min/max along with it: on the frames where the jitter misses a one-pixel
+    // feature, the 3x3 window genuinely does not contain its colour, and
+    // intersecting with that window is exactly the operation that deletes it.
+    const vec3 widened = mix(uClampGamma, uClampGamma * uLockRelax, lock) * sigma;
+    const vec3 lo = mix(max(mu - widened, nMin), mu - widened, lock);
+    const vec3 hi = mix(min(mu + widened, nMax), mu + widened, lock);
+    const vec3 historyColor = yCoCgToRgb(clipToBox(rgbToYCoCg(history.rgb), lo, hi));
+
+    const float total = historyWeight + coverage;
+    const vec3 result = (historyColor * historyWeight + cur * coverage) / max(total, 1e-5);
+
+    imageStore(uOutput, pos, vec4(result, min(total, maxWeight)));
+    imageStore(uLockOutput, pos, vec4(lockLife, lockLuma, 0.0, 0.0));
+}

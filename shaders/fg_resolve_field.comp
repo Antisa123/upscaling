@@ -1,0 +1,38 @@
+#version 460 core
+
+// M7: unpack a scattered field into something the rest of the module can read.
+//
+// The scatter has to happen in 32-bit unsigned images because that is the only
+// storage an atomic maximum works on. Everything downstream wants a vector and
+// a validity flag, and wants them filtered and mipped, so the two integer
+// images are resolved once into an RGBA16F texture:
+//
+//   xy = the winning motion vector, UV space, current -> previous
+//   z  = its priority, normalised to [0,1], kept because the inpainting
+//        pyramid reduces by it
+//   w  = 1 where anything was scattered at all, 0 where the field has a hole
+
+#include "fg_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform usampler2D uFieldX;
+layout(binding = 1) uniform usampler2D uFieldY;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform ivec2 uFieldSize;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uFieldSize))) return;
+
+    const uint px = texelFetch(uFieldX, pos, 0).x;
+    const uint py = texelFetch(uFieldY, pos, 0).x;
+    const uint priority = fgPriority(px);
+    if (priority == 0u) {
+        imageStore(uOutput, pos, vec4(0.0));
+        return;
+    }
+    imageStore(uOutput, pos,
+               vec4(fgValue(px), fgValue(py), float(priority) / 65535.0, 1.0));
+}

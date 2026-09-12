@@ -1,0 +1,58 @@
+#version 460 core
+
+// M6, pass 3a: luminance histogram, nine sections.
+//
+// Block matching has no notion of "these two images are unrelated". On a cut it
+// still returns, for every block, whichever offset happened to minimise SAD --
+// a field of uncorrelated vectors that the frame generator would then use to
+// warp one scene into another. The cheapest reliable detector of a cut is the
+// luminance distribution: a camera move changes *where* things are, a cut
+// changes *what* is there.
+//
+// Nine sections rather than one global histogram, because a global one is
+// blind to the common case where half the screen is replaced (a full-screen
+// effect fading in, a large object entering) while the overall distribution
+// barely moves. The decision takes the worst section, not the average.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uLuma;   // pyramid level 0
+
+layout(std430, binding = 0) buffer Histogram {
+    // [frame parity][section 0..8][bin 0..15]
+    uint counts[2 * 9 * 16];
+};
+
+uniform ivec2 uLumaSize;
+uniform int uSlot;  // 0 or 1: which half of the buffer this frame owns
+
+const int kBins = 16;
+
+shared uint sLocal[9 * kBins];
+
+void main() {
+    const uint lane = gl_LocalInvocationIndex;
+    // Workgroup-local accumulation first. The alternative -- every pixel
+    // hitting global memory -- serialises on 144 addresses for the whole
+    // dispatch, and on Polaris that is the difference between a pass that
+    // costs nothing and one that costs more than the search.
+    for (uint i = lane; i < 9u * uint(kBins); i += gl_WorkGroupSize.x * gl_WorkGroupSize.y)
+        sLocal[i] = 0u;
+    barrier();
+
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (all(lessThan(pos, uLumaSize))) {
+        const float l = clamp(texelFetch(uLuma, pos, 0).r, 0.0, 0.999999);
+        const ivec2 sec = min(pos * 3 / uLumaSize, ivec2(2));
+        const int section = sec.y * 3 + sec.x;
+        const int bin = int(l * float(kBins));
+        atomicAdd(sLocal[section * kBins + bin], 1u);
+    }
+    barrier();
+
+    const uint base = uint(uSlot) * 9u * uint(kBins);
+    for (uint i = lane; i < 9u * uint(kBins); i += gl_WorkGroupSize.x * gl_WorkGroupSize.y) {
+        const uint v = sLocal[i];
+        if (v != 0u) atomicAdd(counts[base + i], v);
+    }
+}

@@ -1,0 +1,33 @@
+# Build
+/build/
+compile_commands.json
+
+# Python
+/.venv/
+__pycache__/
+*.py[cod]
+
+# Editor / OS
+.cache/
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*~
+
+# Scene assets: tuđe glTF scene, dovodi ih scripts/fetch_assets.sh.
+# Ne drže se u repozitoriju (54 MB, i nisu naše za redistribuciju).
+/assets/
+
+# Preuzeta AMD FidelityFX dokumentacija — referentno čitanje, ne naš tekst.
+# Linkovi na izvornik su u docs/reference/README.md.
+/docs/reference/*
+!/docs/reference/README.md
+
+# Snimke: mjerni podaci (CSV, Markdown tablice) idu u repozitorij jer su
+# rezultat mjerenja; renderirani okviri ne idu jer ih svaka skripta iz
+# scripts/ ponovno generira.
+/captures/**/*.png
+/captures/**/*.jpg
+/captures/**/*.jpeg
+/captures/**/*.ppm

@@ -1,0 +1,26 @@
+#version 460 core
+
+// M7: the baseline every interpolated frame is scored against.
+//
+// Half of the previous frame plus half of the current one. It knows nothing
+// about motion, so it is exactly the cost of doing nothing -- and on slow
+// content it is not a bad image, which is the point: a frame generator that
+// cannot beat it is not paying for itself. Measured in-engine on the same pair
+// of frames the module is given, so the comparison is free of any difference
+// in upscaling, tone mapping or capture.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uCurrent;
+layout(binding = 1) uniform sampler2D uPrevious;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform vec2 uDisplaySize;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, ivec2(uDisplaySize)))) return;
+    imageStore(uOutput, pos,
+               vec4(0.5 * (texelFetch(uCurrent, pos, 0).rgb + texelFetch(uPrevious, pos, 0).rgb),
+                    1.0));
+}

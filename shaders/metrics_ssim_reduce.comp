@@ -1,0 +1,65 @@
+#version 460 core
+
+// Stage 3: evaluate SSIM from the Gaussian-weighted moments and reduce to one
+// partial sum per 16x16 tile, matching the layout the MSE pass uses.
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler2D uStats0;  // <a>, <b>, <a*a>, <b*b>
+layout(binding = 1) uniform sampler2D uStats1;  // <a*b>, <valid>
+
+layout(std430, binding = 0) writeonly buffer Partials {
+    vec4 partials[];  // sumSsim, 0, minSsim, validPixelCount
+};
+
+uniform ivec2 uSize;
+
+// Stabilising constants for a peak value of 1.0, as in Wang et al. 2004.
+const float kC1 = 0.0001;
+const float kC2 = 0.0009;
+
+shared vec4 sPartial[gl_WorkGroupSize.x * gl_WorkGroupSize.y];
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    uint localIndex = gl_LocalInvocationIndex;
+
+    vec4 local = vec4(0.0, 0.0, 1.0, 0.0);
+    if (coord.x < uSize.x && coord.y < uSize.y) {
+        vec4 s0 = texelFetch(uStats0, coord, 0);
+        vec2 s1 = texelFetch(uStats1, coord, 0).rg;
+        float w = s1.y;
+
+        // A window straddling the image border or a disoccluded region is only
+        // partially defined; scoring it would mix in pixels that have no
+        // counterpart at all.
+        if (w > 0.999) {
+            float muA = s0.x / w;
+            float muB = s0.y / w;
+            float varA = max(s0.z / w - muA * muA, 0.0);
+            float varB = max(s0.w / w - muB * muB, 0.0);
+            float covAB = s1.x / w - muA * muB;
+
+            float ssim = ((2.0 * muA * muB + kC1) * (2.0 * covAB + kC2)) /
+                         ((muA * muA + muB * muB + kC1) * (varA + varB + kC2));
+            local = vec4(ssim, 0.0, ssim, 1.0);
+        }
+    }
+
+    sPartial[localIndex] = local;
+    barrier();
+
+    for (uint stride = (gl_WorkGroupSize.x * gl_WorkGroupSize.y) / 2u; stride > 0u; stride >>= 1u) {
+        if (localIndex < stride) {
+            vec4 other = sPartial[localIndex + stride];
+            sPartial[localIndex].x += other.x;
+            sPartial[localIndex].z = min(sPartial[localIndex].z, other.z);
+            sPartial[localIndex].w += other.w;
+        }
+        barrier();
+    }
+
+    if (localIndex == 0u) {
+        uint groupIndex = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+        partials[groupIndex] = sPartial[0];
+    }
+}

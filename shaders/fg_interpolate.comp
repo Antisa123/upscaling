@@ -1,0 +1,125 @@
+#version 460 core
+
+// M7, pass 7: the interpolated frame itself.
+//
+// Two levels of choice, and they are different questions:
+//
+//   1. *Within* one vector field, which of the two warps to believe. That is
+//      geometry, and the disocclusion masks answer it: a surface hidden at
+//      t-1 must be taken from t and vice versa. Where both are visible, both
+//      are used, which is also what averages away half the resampling error.
+//
+//   2. *Between* the two fields, which vector to believe. That is not
+//      geometry -- both fields are complete after inpainting, and both will
+//      hand back an answer for every pixel -- so it is settled by evidence:
+//      how well the two ends of the vector agree in colour. A vector that
+//      lands the same surface on itself produces two nearly identical warps;
+//      a wrong one produces two different images, and says so.
+//
+// The game vectors know about geometry and nothing about light: a shadow
+// sweeping across a static floor has zero motion in the velocity buffer. The
+// flow vectors know only what the image shows, so they see the shadow but lose
+// thin geometry and flat walls. Choosing per pixel by colour agreement is what
+// lets each one cover the other's blind spot; the point of the ablations is
+// that this is measured, not assumed.
+//
+// When neither field has anything to say, the fallback is the 50/50 blend --
+// the same image the naive baseline produces, which is the floor this module
+// has to beat overall. Those pixels are marked in the alpha channel so M8's
+// inpainting can find them.
+
+#include "fg_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uCurrent;    // display res, display-referred
+layout(binding = 1) uniform sampler2D uPrevious;
+layout(binding = 2) uniform sampler2D uGameField;  // resolved + inpainting pyramid
+layout(binding = 3) uniform sampler2D uFlowField;
+layout(binding = 4) uniform sampler2D uMasks;      // x = occluded vs prev, y = vs cur
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+layout(rgba8, binding = 1) uniform writeonly image2D uDebug;
+
+uniform vec2 uDisplaySize;
+uniform ivec2 uFieldSize;
+uniform int uLevels;       // levels of the inpainting pyramid to walk
+uniform int uGameEnabled;
+uniform int uFlowEnabled;
+uniform int uMaskEnabled;
+// Colour distance that costs a candidate a factor of e of its weight. Larger
+// makes the choice between the two fields sharper.
+uniform float uAgreement;
+// First frame, or the frame after a cut: there is no previous image to
+// interpolate towards, so the interpolated frame is a copy of the current one.
+// Showing a blend of two unrelated images would be strictly worse than showing
+// the same frame twice.
+uniform int uReset;
+
+struct Candidate {
+    vec3 color;
+    float weight;
+};
+
+Candidate warp(vec2 uv, vec2 mv, vec2 occ) {
+    const vec3 fromPrev = texture(uPrevious, uv + 0.5 * mv).rgb;
+    const vec3 fromCur = texture(uCurrent, uv - 0.5 * mv).rgb;
+
+    float wPrev = 1.0 - occ.x;
+    float wCur = 1.0 - occ.y;
+    // Both directions rejected: the masks disagree with each other, which is
+    // information we do not have a use for. Fall back to an equal blend and
+    // let the colour evidence below decide how much this candidate is worth.
+    if (wPrev + wCur < 1e-3) {
+        wPrev = 0.5;
+        wCur = 0.5;
+    }
+
+    Candidate c;
+    c.color = (wPrev * fromPrev + wCur * fromCur) / (wPrev + wCur);
+    // The two ends only constitute a second opinion where both were usable.
+    const float both = min(wPrev, wCur) / max(max(wPrev, wCur), 1e-6);
+    c.weight = mix(0.5, exp(-uAgreement * fgColorDistance(fromPrev, fromCur)), both);
+    return c;
+}
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, ivec2(uDisplaySize)))) return;
+    const vec2 uv = (vec2(pos) + 0.5) / uDisplaySize;
+
+    const vec3 cur = texture(uCurrent, uv).rgb;
+    const vec3 prev = texture(uPrevious, uv).rgb;
+    if (uReset != 0) {
+        imageStore(uOutput, pos, vec4(cur, 1.0));
+        imageStore(uDebug, pos, vec4(0.0, 0.0, 1.0, 1.0));
+        return;
+    }
+
+    const vec2 occ = uMaskEnabled != 0 ? texture(uMasks, uv).rg : vec2(0.0);
+
+    int gameLevel = uLevels;
+    int flowLevel = uLevels;
+    vec4 game = vec4(0.0);
+    vec4 flow = vec4(0.0);
+    if (uGameEnabled != 0) game = fgFetchField(uGameField, uv, uFieldSize, uLevels, gameLevel);
+    if (uFlowEnabled != 0) flow = fgFetchField(uFlowField, uv, uFieldSize, uLevels, flowLevel);
+
+    vec3 color = 0.5 * (cur + prev);
+    float confidence = 0.0;
+    if (game.w > 0.5 || flow.w > 0.5) {
+        const Candidate g = game.w > 0.5 ? warp(uv, game.xy, occ) : Candidate(vec3(0.0), 0.0);
+        const Candidate f = flow.w > 0.5 ? warp(uv, flow.xy, occ) : Candidate(vec3(0.0), 0.0);
+        const float sum = g.weight + f.weight;
+        if (sum > 1e-6) {
+            color = (g.weight * g.color + f.weight * f.color) / sum;
+            confidence = max(g.weight, f.weight);
+        }
+    }
+
+    imageStore(uOutput, pos, vec4(color, confidence));
+    // Red and green are the two masks; blue is how far up the pyramid this
+    // pixel's vector had to be fetched from, i.e. how much of the frame is
+    // being carried by inpainted motion rather than measured motion.
+    const float inpainted = float(min(gameLevel, flowLevel)) / float(max(uLevels, 1));
+    imageStore(uDebug, pos, vec4(occ.x, occ.y, inpainted, 1.0));
+}

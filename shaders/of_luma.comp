@@ -1,0 +1,43 @@
+#version 460 core
+
+// M6, pass 1: luminance input for the optical flow pyramid.
+//
+// Block matching works on a scalar field, and luminance is the one channel
+// whose value is dominated by geometry and shading rather than by material
+// colour. It also halves the resolution on the way in: the flow field is
+// consumed at 8x8-block granularity anyway, and starting from half resolution
+// removes a quarter of the work and most of the per-pixel aliasing that block
+// matching would otherwise chase.
+//
+// The input is the display-referred image the user actually sees (post
+// upscale), not the linear HDR G-buffer. That is deliberate and it is what
+// FSR3 does: optical flow exists to catch the motion the game's vectors do not
+// describe -- shadows, reflections, shading changes, animated textures -- and
+// all of those live in the final image.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uInput;   // display res, display-referred
+layout(r16f, binding = 0) uniform writeonly image2D uOutput;  // half res, luma
+
+uniform ivec2 uInputSize;
+uniform ivec2 uOutputSize;
+
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uOutputSize))) return;
+
+    // Box average of the 2x2 source footprint. A point sample here would alias
+    // the very high frequencies the search is least able to match.
+    const ivec2 base = pos * 2;
+    const ivec2 maxCoord = uInputSize - 1;
+    float sum = 0.0;
+    for (int dy = 0; dy < 2; ++dy) {
+        for (int dx = 0; dx < 2; ++dx) {
+            sum += luma(texelFetch(uInput, min(base + ivec2(dx, dy), maxCoord), 0).rgb);
+        }
+    }
+    imageStore(uOutput, pos, vec4(sum * 0.25, 0.0, 0.0, 0.0));
+}

@@ -1,0 +1,15 @@
+#version 460 core
+
+// Sanity check for the compute path: writes a gradient plus the current time
+// into an RGBA16F image. Removed once real passes exist.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba16f) uniform writeonly image2D uOutput;
+uniform float uTime;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(uOutput);
+    if (any(greaterThanEqual(coord, size))) return;
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    imageStore(uOutput, coord, vec4(uv, 0.5 + 0.5 * sin(uTime), 1.0));
+}

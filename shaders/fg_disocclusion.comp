@@ -1,0 +1,98 @@
+#version 460 core
+
+// M7, pass 6: the two disocclusion masks.
+//
+// Every pixel of the interpolated frame is built from two warps -- one pulled
+// forward from t-1, one pulled back from t -- and the reason the result is not
+// simply their average is that for a large fraction of the image exactly one
+// of the two is valid. Behind an object that moved, the previous frame has no
+// pixels: that area was hidden. Ahead of it, the current frame has none. Using
+// both there is what produces the smeared halo that gives naive interpolation
+// away.
+//
+// So: two masks, one per direction, each answering "was this surface visible
+// at that instant". The evidence is depth, exactly as in the upscaler's
+// disocclusion test. Take the reconstructed depth of the interpolated frame,
+// look up the depth buffer of the frame being warped from at the position the
+// vector points to, and compare. Agreement means the surface was there;
+// disagreement means something else was, and that direction's colour belongs
+// to a different object.
+//
+//   x = occlusion with respect to the previous frame (1 = do not warp from it)
+//   y = occlusion with respect to the current frame
+//
+// The comparison is relative and includes the local depth spread, because a
+// floor seen at a grazing angle legitimately spans metres inside one texel's
+// neighbourhood and a fixed tolerance would declare the whole thing
+// disoccluded every frame.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uField;          // resolved game vector field
+layout(binding = 1) uniform sampler2D uDepthInfo;      // render res, (curZ, prevZ)
+layout(binding = 2) uniform sampler2D uPrevDepthInfo;  // the same, last frame
+layout(r32ui, binding = 0) uniform readonly uimage2D uDepthField;
+layout(rgba8, binding = 1) uniform writeonly image2D uOutput;
+
+uniform ivec2 uFieldSize;
+uniform float uDepthTolerance;
+uniform int uEnabled;
+
+// Nearest surface among the four texels a sample lands between, and how far
+// they spread. Taking the minimum rather than a filtered value matters on a
+// silhouette: half a texel of misalignment would otherwise read the background
+// and report a disocclusion on a surface that never moved.
+vec2 nearestAndSpread(sampler2D depthTex, vec2 uv) {
+    const vec4 g = textureGather(depthTex, uv, 0);
+    const float lo = min(min(g.x, g.y), min(g.z, g.w));
+    const float hi = max(max(g.x, g.y), max(g.z, g.w));
+    return vec2(lo, hi - lo);
+}
+
+float occlusion(float expected, vec2 nearest, float tolerance) {
+    const float tol = max(tolerance * expected + nearest.y, 1e-6);
+    // Ramps over a second tolerance width instead of switching, so a surface
+    // that is marginally out of agreement loses part of its history rather
+    // than all of it -- a hard threshold shows up as a crawling one-texel line
+    // along every silhouette.
+    return clamp(abs(nearest.x - expected) / tol - 1.0, 0.0, 1.0);
+}
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uFieldSize))) return;
+
+    if (uEnabled == 0) {
+        imageStore(uOutput, pos, vec4(0.0));
+        return;
+    }
+
+    const uint packedDepth = imageLoad(uDepthField, pos).x;
+    const vec4 field = texelFetch(uField, pos, 0);
+    // No depth scattered here means no surface reached this texel by the
+    // linear-motion assumption, so there is nothing to test the warps against.
+    // Reporting "not occluded" is the honest answer: the decision is handed to
+    // the colour agreement in the interpolation pass, which is the only
+    // evidence left.
+    if (packedDepth == 0xFFFFFFFFu || field.w < 0.5) {
+        imageStore(uOutput, pos, vec4(0.0));
+        return;
+    }
+
+    const float midZ = uintBitsToFloat(packedDepth);
+    const vec2 uv = (vec2(pos) + 0.5) / vec2(uFieldSize);
+    const vec2 mv = field.xy;
+
+    const vec2 prevUV = uv + 0.5 * mv;
+    const vec2 curUV = uv - 0.5 * mv;
+
+    float occPrev = 1.0;
+    if (all(greaterThanEqual(prevUV, vec2(0.0))) && all(lessThanEqual(prevUV, vec2(1.0))))
+        occPrev = occlusion(midZ, nearestAndSpread(uPrevDepthInfo, prevUV), uDepthTolerance);
+
+    float occCur = 1.0;
+    if (all(greaterThanEqual(curUV, vec2(0.0))) && all(lessThanEqual(curUV, vec2(1.0))))
+        occCur = occlusion(midZ, nearestAndSpread(uDepthInfo, curUV), uDepthTolerance);
+
+    imageStore(uOutput, pos, vec4(occPrev, occCur, 0.0, 0.0));
+}

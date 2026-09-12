@@ -1,0 +1,34 @@
+#version 460 core
+
+// One axis of the 11x11, sigma = 1.5 Gaussian window used by the SSIM
+// reference implementation. Run twice with uDir = (1,0) then (0,1).
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uStats0In;
+layout(binding = 1) uniform sampler2D uStats1In;
+
+layout(binding = 0, rgba32f) writeonly uniform image2D uStats0Out;
+layout(binding = 1, rg32f) writeonly uniform image2D uStats1Out;
+
+uniform ivec2 uDir;
+uniform ivec2 uSize;
+
+const float kWeights[6] = float[6](0.2659615, 0.2130055, 0.1093607, 0.0359971, 0.0076099, 0.0010281);
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= uSize.x || coord.y >= uSize.y) return;
+
+    vec4 sum0 = texelFetch(uStats0In, coord, 0) * kWeights[0];
+    vec2 sum1 = texelFetch(uStats1In, coord, 0).rg * kWeights[0];
+
+    for (int k = 1; k <= 5; ++k) {
+        ivec2 lo = clamp(coord - uDir * k, ivec2(0), uSize - 1);
+        ivec2 hi = clamp(coord + uDir * k, ivec2(0), uSize - 1);
+        sum0 += (texelFetch(uStats0In, lo, 0) + texelFetch(uStats0In, hi, 0)) * kWeights[k];
+        sum1 += (texelFetch(uStats1In, lo, 0).rg + texelFetch(uStats1In, hi, 0).rg) * kWeights[k];
+    }
+
+    imageStore(uStats0Out, coord, sum0);
+    imageStore(uStats1Out, coord, vec4(sum1, 0.0, 0.0));
+}

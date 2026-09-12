@@ -1,0 +1,100 @@
+#version 460 core
+
+// M6, pass 3b: turn the two histograms into a single verdict.
+//
+// Per section, the total variation distance between this frame's normalised
+// histogram and the previous frame's: 0.5 * sum |p_i - q_i|, which is in [0,1]
+// and reads directly as "the fraction of the section's pixels that changed
+// bin". The verdict is the *median* of the nine, not the worst.
+//
+// The worst section is the obvious choice and it is wrong. A fast pan replaces
+// the content of the two or three sections along the leading edge outright
+// while the rest of the frame is merely displaced, so the maximum crosses any
+// useful threshold on every whip pan -- measured on the Sponza orbit, five
+// consecutive frames of a close pass were declared cuts and had their flow
+// discarded, turning an endpoint error of 10 px into 366 px. A real cut changes
+// all nine sections at once. The median is the cheapest statistic that tells
+// the two apart, and it degrades gracefully: a cut has to survive being wrong
+// about four sections before it is missed.
+//
+// Nine threads, one dispatch of one workgroup. The result stays on the GPU and
+// is read by the search pass as a uniform buffer would be read -- no CPU round
+// trip, because a round trip here would cost a pipeline stall every frame to
+// deliver one bit.
+
+layout(local_size_x = 9) in;
+
+layout(std430, binding = 0) readonly buffer Histogram {
+    uint counts[2 * 9 * 16];
+};
+
+layout(std430, binding = 1) buffer SceneChange {
+    uint sceneChanged;   // 1 = discard this frame's flow entirely
+    float difference;    // the statistic the verdict used, for logging and debug
+    float dMax;          // all three are written every frame so that choosing
+    float dMean;         // between them is a measurement and not an assertion;
+    float dMedian;       // only `difference` feeds the verdict
+};
+
+uniform int uSlot;       // which half holds this frame
+uniform int uHasPrev;    // 0 on the first frame: nothing to compare against
+uniform float uThreshold;
+uniform int uEnabled;
+// 0 = worst section, 1 = mean, 2 = median. See the comment above for why the
+// default is the median.
+uniform int uStatistic;
+
+const int kBins = 16;
+
+shared float sDiff[9];
+
+void main() {
+    const int section = int(gl_LocalInvocationID.x);
+    const uint cur = uint(uSlot) * 9u * uint(kBins) + uint(section * kBins);
+    const uint prev = uint(1 - uSlot) * 9u * uint(kBins) + uint(section * kBins);
+
+    float curTotal = 0.0;
+    float prevTotal = 0.0;
+    for (int b = 0; b < kBins; ++b) {
+        curTotal += float(counts[cur + uint(b)]);
+        prevTotal += float(counts[prev + uint(b)]);
+    }
+
+    float d = 0.0;
+    if (curTotal > 0.0 && prevTotal > 0.0) {
+        const float invCur = 1.0 / curTotal;
+        const float invPrev = 1.0 / prevTotal;
+        for (int b = 0; b < kBins; ++b)
+            d += abs(float(counts[cur + uint(b)]) * invCur -
+                     float(counts[prev + uint(b)]) * invPrev);
+        d *= 0.5;
+    }
+    sDiff[section] = d;
+    barrier();
+
+    if (section == 0) {
+        // Full selection sort of nine elements in one thread, which is not
+        // worth being clever about and gives the maximum and the median from
+        // the same pass.
+        float v[9];
+        for (int i = 0; i < 9; ++i) v[i] = sDiff[i];
+        for (int i = 0; i <= 7; ++i) {
+            int m = i;
+            for (int j = i + 1; j < 9; ++j)
+                if (v[j] < v[m]) m = j;
+            const float t = v[i]; v[i] = v[m]; v[m] = t;
+        }
+        float mean = 0.0;
+        for (int i = 0; i < 9; ++i) mean += v[i];
+        mean *= 1.0 / 9.0;
+
+        dMax = v[8];
+        dMean = mean;
+        dMedian = v[4];
+
+        const float d = uStatistic == 0 ? v[8] : (uStatistic == 1 ? mean : v[4]);
+        difference = d;
+        const bool changed = uHasPrev == 0 || d > uThreshold;
+        sceneChanged = (uEnabled != 0 && changed) ? 1u : 0u;
+    }
+}

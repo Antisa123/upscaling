@@ -1,0 +1,39 @@
+#version 460 core
+
+// M6, pass 2: one level of the luminance pyramid.
+//
+// Coarse-to-fine is what makes block matching able to find large displacements
+// at all. A search window of +-R texels finds +-R pixels of motion; run the
+// same search on a level reduced 2^L times and it finds +-R*2^L pixels, then
+// the finer levels only ever have to correct the residual. Without the pyramid
+// the window would have to cover the largest motion in the scene directly, and
+// the cost of a window is quadratic in its radius.
+//
+// One dispatch per level rather than a single-pass downsampler: the levels are
+// tiny, the barrier between them is cheap, and having each level separately
+// timed is worth more to this project than the handful of microseconds a
+// single-pass reduction would save.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uPyramid;
+layout(r16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform int uSrcLevel;
+uniform ivec2 uSrcSize;
+uniform ivec2 uDstSize;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uDstSize))) return;
+
+    const ivec2 base = pos * 2;
+    const ivec2 maxCoord = uSrcSize - 1;
+    float sum = 0.0;
+    for (int dy = 0; dy < 2; ++dy) {
+        for (int dx = 0; dx < 2; ++dx) {
+            sum += texelFetch(uPyramid, min(base + ivec2(dx, dy), maxCoord), uSrcLevel).r;
+        }
+    }
+    imageStore(uOutput, pos, vec4(sum * 0.25, 0.0, 0.0, 0.0));
+}

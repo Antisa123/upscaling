@@ -1,0 +1,56 @@
+#version 460 core
+
+// M7, pass 2: depth of the interpolated frame.
+//
+// The frame at t-0.5 is never rendered, so it has no depth buffer -- but every
+// pass after this one needs to know which surface is in front at each of its
+// texels, because that is what decides whose motion vector is allowed to
+// occupy it. The reconstruction is the same linear-motion assumption the whole
+// module rests on: a surface that moved by `mv` between t-1 and t was halfway
+// along that path at t-0.5, so its depth is scattered to `uv + 0.5 * mv`.
+//
+// The vectors point current -> previous (the G-buffer's convention), so the
+// interpolated frame lies at *plus* half a vector, not minus.
+//
+// Nearest wins, by imageAtomicMin over the raw float bits. Linear view
+// distance is positive, and IEEE-754 positive floats compare in the same order
+// as their bit patterns read as unsigned integers, so the integer atomic
+// orders depths correctly without any encoding step.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// xy = dilated motion vector, z = disocclusion, w = nearest depth.
+layout(binding = 0) uniform sampler2D uDilated;
+// Fallback sources when no upscaler produced a dilated buffer.
+layout(binding = 1) uniform sampler2D uVelocity;
+layout(binding = 2) uniform sampler2D uDepthInfo;
+layout(r32ui, binding = 0) uniform uimage2D uDepthField;
+
+uniform vec2 uRenderSize;
+uniform vec2 uFieldSize;
+uniform int uHasDilated;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, ivec2(uRenderSize)))) return;
+
+    vec2 mv;
+    float z;
+    if (uHasDilated != 0) {
+        const vec4 d = texelFetch(uDilated, pos, 0);
+        mv = d.xy;
+        z = d.w;
+    } else {
+        mv = texelFetch(uVelocity, pos, 0).rg;
+        z = texelFetch(uDepthInfo, pos, 0).x;
+    }
+
+    const vec2 uv = (vec2(pos) + 0.5) / uRenderSize;
+    const vec2 mid = uv + 0.5 * mv;
+    // A surface that leaves the frame between t-1 and t has no place in the
+    // interpolated one either.
+    if (any(lessThan(mid, vec2(0.0))) || any(greaterThanEqual(mid, vec2(1.0)))) return;
+
+    const ivec2 target = clamp(ivec2(mid * uFieldSize), ivec2(0), ivec2(uFieldSize) - 1);
+    imageAtomicMin(uDepthField, target, floatBitsToUint(z));
+}

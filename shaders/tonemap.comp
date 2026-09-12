@@ -1,0 +1,28 @@
+#version 460 core
+
+// Linear HDR -> display-referred [0,1].
+//
+// Spatial upscalers in the FSR1 family are specified to run *after* tone
+// mapping, on perceptually encoded values: their limiters assume a peak of 1.0
+// and their edge detection assumes perceptual, not linear, contrast. Feeding
+// them raw HDR would break both. Running this pass first also puts the
+// upscaler's output in exactly the domain the metric passes score in, so no
+// image is ever tone mapped twice.
+
+#include "metrics_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uInput;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform float uExposure;
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(uOutput);
+    if (any(greaterThanEqual(pos, size))) return;
+
+    vec3 hdr = texelFetch(uInput, pos, 0).rgb * uExposure;
+    imageStore(uOutput, pos, vec4(metricsToDisplay(hdr, 1), 1.0));
+}

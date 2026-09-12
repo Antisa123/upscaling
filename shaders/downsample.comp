@@ -1,0 +1,35 @@
+#version 460 core
+
+// Box downsample by an integer factor, used only by the reference path.
+//
+// A supersampled ground truth is what a temporal upscaler has to be scored
+// against. Rendering the reference once at display resolution produces an
+// *aliased* image, and an aliased reference systematically rewards blur: a
+// bilinear upscale scores better than a correct reconstruction simply because
+// neither of them has the reference's stair-steps, and the blurrier one is
+// closer to their average. Rendering at N x display resolution and averaging
+// down gives the antialiased image the reconstruction is actually aiming at.
+//
+// The average is taken in linear HDR, before tone mapping, which is what an
+// SSAA renderer does and the only order that is radiometrically correct.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uInput;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform int uFactor;
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(uOutput);
+    if (any(greaterThanEqual(pos, size))) return;
+
+    const ivec2 base = pos * uFactor;
+    vec4 sum = vec4(0.0);
+    for (int y = 0; y < uFactor; ++y)
+        for (int x = 0; x < uFactor; ++x)
+            sum += texelFetch(uInput, base + ivec2(x, y), 0);
+
+    imageStore(uOutput, pos, sum / float(uFactor * uFactor));
+}

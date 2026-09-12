@@ -1,0 +1,69 @@
+#version 460 core
+
+// Non-adaptive spatial baselines: nearest, bilinear and Catmull-Rom bicubic.
+//
+// These are the reference points the whole thesis is measured against. They use
+// one frame and no scene information at all, so whatever the temporal upscaler
+// gains over them is precisely the contribution of temporal accumulation and
+// motion vectors.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uInput;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform int uMode;  // 0 nearest, 1 bilinear, 2 bicubic
+uniform vec2 uInputSize;
+uniform vec2 uInvInputSize;
+uniform vec2 uOutputSize;
+
+// Catmull-Rom, i.e. Mitchell-Netravali with B = 0, C = 1/2. Interpolating
+// (passes through the samples) and mildly sharpening, which is why it is the
+// usual "good" choice for upscaling; the overshoot it produces at hard edges is
+// also the artefact FSR1's directional filter exists to avoid.
+vec4 catmullRomWeights(float x) {
+    float x2 = x * x;
+    float x3 = x2 * x;
+    return vec4(-0.5 * x3 + x2 - 0.5 * x,
+                 1.5 * x3 - 2.5 * x2 + 1.0,
+                -1.5 * x3 + 2.0 * x2 + 0.5 * x,
+                 0.5 * x3 - 0.5 * x2);
+}
+
+vec3 fetchClamped(ivec2 p) {
+    return texelFetch(uInput, clamp(p, ivec2(0), ivec2(uInputSize) - 1), 0).rgb;
+}
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, ivec2(uOutputSize)))) return;
+
+    // Centre-to-centre mapping: the centre of output pixel i sits at
+    // (i + 0.5) / outputSize in UV, which is srcPos in input texel coordinates
+    // where integer values land on texel centres.
+    vec2 uv = (vec2(pos) + 0.5) / uOutputSize;
+    vec2 srcPos = uv * uInputSize - 0.5;
+
+    vec3 result;
+    if (uMode == 0) {
+        result = fetchClamped(ivec2(floor(srcPos + 0.5)));
+    } else if (uMode == 1) {
+        result = texture(uInput, uv).rgb;
+    } else {
+        ivec2 base = ivec2(floor(srcPos));
+        vec2 f = srcPos - vec2(base);
+        vec4 wx = catmullRomWeights(f.x);
+        vec4 wy = catmullRomWeights(f.y);
+        result = vec3(0.0);
+        for (int j = 0; j < 4; ++j) {
+            vec3 row = vec3(0.0);
+            for (int i = 0; i < 4; ++i) row += wx[i] * fetchClamped(base + ivec2(i - 1, j - 1));
+            result += wy[j] * row;
+        }
+        // Catmull-Rom's negative lobes can push a value below zero at a hard
+        // edge; the display domain has no room for that.
+        result = max(result, vec3(0.0));
+    }
+
+    imageStore(uOutput, pos, vec4(result, 1.0));
+}

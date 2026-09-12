@@ -1,0 +1,56 @@
+#version 460 core
+
+// M7, pass 4: inpainting pyramid over a vector field.
+//
+// The scatter leaves holes, and a hole is not a place where nothing moves --
+// it is a place where nothing in the *previous* frame ended up, which is the
+// definition of a disocclusion. Filling it with zero motion would freeze a
+// patch of the interpolated image; filling it from a neighbour needs a
+// neighbour, and the nearest valid one can be a long way off when a whole
+// object's trailing edge opens up at once.
+//
+// A mip chain answers that in log(n) steps: each level holds one vector for a
+// region twice as wide, so a consumer that finds a hole at level 0 walks up
+// until some level has an answer, and the answer it gets is the one from the
+// smallest region that contains a real sample.
+//
+// Which of the (up to four) valid children survives is a choice, and not an
+// obvious one. `uPick = 0` keeps the highest priority, which is the nearest
+// surface. `uPick = 1` keeps the lowest, which for the game field means the
+// farthest -- and that is the default, because the holes being filled are
+// disocclusions: the pixels there belong to whatever was *behind* the object
+// that moved away, so the background vector is the one that describes them.
+// The flag exists because that argument deserves a measurement rather than a
+// footnote; see docs/FRAMEGEN.md for both numbers.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uField;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform int uSrcLevel;
+uniform ivec2 uSrcSize;
+uniform ivec2 uDstSize;
+uniform int uPick;  // 0 = highest priority, 1 = lowest
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uDstSize))) return;
+
+    const ivec2 base = pos * 2;
+    vec4 best = vec4(0.0);
+    float bestScore = uPick == 0 ? -1.0 : 1e30;
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            const ivec2 q = min(base + ivec2(x, y), uSrcSize - 1);
+            const vec4 v = texelFetch(uField, q, uSrcLevel);
+            if (v.w < 0.5) continue;
+            const float score = v.z;
+            if (uPick == 0 ? score > bestScore : score < bestScore) {
+                bestScore = score;
+                best = v;
+            }
+        }
+    }
+    imageStore(uOutput, pos, best);
+}

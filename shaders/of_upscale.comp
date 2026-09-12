@@ -1,0 +1,117 @@
+#version 460 core
+
+// M6, pass 6: choose each block's starting vector before the search refines it.
+//
+// Three sources of a candidate, all evaluated by the same criterion -- the SAD
+// the candidate actually achieves on this block, at this level:
+//
+//   * The coarser level. Each fine block inherits from a coarse block that
+//     covered four times its area, so copying the parent blindly smears the
+//     coarse level's block boundaries into the fine level: near a motion edge
+//     the parent is an average of two motions and is wrong for both halves of
+//     its own area. Offering the parent and the three coarse blocks nearest to
+//     this one lets a motion boundary snap to the finer grid a level at a time.
+//   * The previous frame's finished flow field. Motion is temporally coherent
+//     -- a camera turning at a constant rate produces nearly the same field two
+//     frames running -- so last frame's answer is a better prior than anything
+//     the pyramid can supply, and it does not degrade with the size of the
+//     displacement the way a coarse-to-fine chain does.
+//   * Zero. The escape hatch: without it a coarse level that latched onto
+//     nonsense hands that nonsense down, and the finer levels can only correct
+//     it by a few texels each.
+//
+// Vectors are in UV of the full image, so "upscaling" them is the identity;
+// the only thing this pass does is choose. That is not a simplification of the
+// reference design, it is the same operation with the scaling factored out.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uFlow;      // coarse level
+layout(binding = 1) uniform sampler2D uCur;       // luma pyramid, this frame
+layout(binding = 2) uniform sampler2D uPrev;      // luma pyramid, last frame
+layout(binding = 3) uniform sampler2D uPrevFlow;  // last frame's final field
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform int uLevel;          // the fine level being predicted
+uniform ivec2 uLevelSize;    // luma texels at the fine level
+uniform ivec2 uFineGrid;
+uniform ivec2 uCoarseGrid;
+uniform int uHasCoarse;      // 0 at the coarsest level
+uniform int uEnabled;        // 0: inherit the parent vector without choosing
+uniform int uTemporal;       // 0: drop last frame's field from the candidates
+// Penalty, in mean absolute luminance, charged to the two candidates that do
+// not come from the pyramid. Without it they win on noise: inside a
+// low-contrast block almost anything scores within a thousandth of anything
+// else, and a block that had a perfectly good inherited vector gets reset to
+// zero. The coarsest level charges nothing -- there is no inherited vector to
+// protect there, and a restart is the whole point.
+uniform float uNovelty;
+
+const int kBlock = 8;
+const int kCandidates = 6;
+
+shared float sCost[kCandidates * 64];
+
+void main() {
+    const ivec2 fine = ivec2(gl_WorkGroupID.xy);
+    if (any(greaterThanEqual(fine, uFineGrid))) return;
+    const uint lane = gl_LocalInvocationIndex;
+
+    const ivec2 coarseMax = max(uCoarseGrid - 1, ivec2(0));
+    const ivec2 parent = min(fine / 2, coarseMax);
+
+    if (uEnabled == 0) {
+        if (lane == 0u)
+            imageStore(uOutput, fine, uHasCoarse != 0 ? texelFetch(uFlow, parent, 0) : vec4(0.0));
+        return;
+    }
+
+    // Which way the fine block sits inside its parent decides which three
+    // coarse neighbours are the plausible alternatives.
+    const ivec2 dir = (fine & ivec2(1)) * 2 - ivec2(1);
+    const ivec2 taps[4] = ivec2[4](parent,
+                                   clamp(parent + ivec2(dir.x, 0), ivec2(0), coarseMax),
+                                   clamp(parent + ivec2(0, dir.y), ivec2(0), coarseMax),
+                                   clamp(parent + dir, ivec2(0), coarseMax));
+
+    vec4 cand[kCandidates];
+    for (int i = 0; i < 4; ++i)
+        cand[i] = uHasCoarse != 0 ? texelFetch(uFlow, taps[i], 0) : vec4(0.0);
+    const vec2 blockUv = (vec2(fine) + 0.5) / vec2(uFineGrid);
+    cand[4] = uTemporal != 0 ? vec4(texture(uPrevFlow, blockUv).xy, 0.0, 0.0) : vec4(0.0);
+    cand[5] = vec4(0.0);
+
+    const ivec2 p = ivec2(int(lane) % kBlock, int(lane) / kBlock);
+    const ivec2 pos = fine * kBlock + p;
+    const ivec2 maxCoord = uLevelSize - 1;
+    const float cur = texelFetch(uCur, min(pos, maxCoord), uLevel).r;
+
+    for (int i = 0; i < kCandidates; ++i) {
+        const ivec2 off = ivec2(round(cand[i].xy * vec2(uLevelSize)));
+        sCost[i * 64 + int(lane)] =
+            abs(cur - texelFetch(uPrev, clamp(pos + off, ivec2(0), maxCoord), uLevel).r);
+    }
+    barrier();
+
+    for (uint stride = 32u; stride > 0u; stride >>= 1) {
+        if (lane < stride)
+            for (int i = 0; i < kCandidates; ++i)
+                sCost[i * 64 + int(lane)] += sCost[i * 64 + int(lane + stride)];
+        barrier();
+    }
+
+    if (lane == 0u) {
+        int best = uHasCoarse != 0 ? 0 : 5;
+        float bestSad = sCost[best * 64] / float(kBlock * kBlock) + (best >= 4 ? uNovelty : 0.0);
+        for (int i = 0; i < kCandidates; ++i) {
+            // Strict improvement only: ties go to the first candidate, which is
+            // the vector the coarser level already committed to.
+            const float sad = sCost[i * 64] / float(kBlock * kBlock) + (i >= 4 ? uNovelty : 0.0);
+            if (sad < bestSad) {
+                bestSad = sad;
+                best = i;
+            }
+        }
+        imageStore(uOutput, fine, vec4(cand[best].xy, bestSad, 1.0));
+    }
+}

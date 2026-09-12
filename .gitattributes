@@ -1,0 +1,19 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.glb binary
+*.gltf binary
+*.bin binary
+
+# Mjerni CSV-ovi se generiraju, i csv.writer piše CRLF. Bez ovoga bi ih git
+# normalizirao na LF i svaka regeneracija tablica bila bi lažna izmjena.
+*.csv -text
+
+# Single-header biblioteke — ne ulaze u statistiku jezika ni u diffove.
+third_party/** linguist-vendored
+
+*.comp linguist-language=GLSL
+*.glsl linguist-language=GLSL
+*.vert linguist-language=GLSL
+*.frag linguist-language=GLSL

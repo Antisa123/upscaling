@@ -1,0 +1,68 @@
+#version 460 core
+
+// M6 validation: endpoint error of the optical flow against the game's own
+// motion vectors.
+//
+// On a scene whose only motion is the camera, the rasteriser's motion vectors
+// are not an approximation of the truth -- they *are* the truth, computed
+// analytically from two projections of the same vertex. That makes them a free
+// ground truth for the flow estimator, and endpoint error (the length of the
+// difference, in display pixels) the standard way to score one.
+//
+// Two honest caveats, both stated in the results rather than hidden:
+//   * the flow is estimated on the *upscaled* image, which is temporally
+//     accumulated, so it sees a slightly lagged version of the motion;
+//   * block matching answers with one vector per 8x8 block, so it is compared
+//     against the game vectors averaged over the same block. A block straddling
+//     a silhouette has no single correct answer and will show error no
+//     estimator could remove.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uFlow;      // block grid, UV
+layout(binding = 1) uniform sampler2D uVelocity;  // render res, UV
+
+layout(std430, binding = 0) writeonly buffer Partials {
+    vec4 partials[];  // (sum of EPE, blocks, blocks within 1 px, blocks within 2 px)
+};
+
+uniform ivec2 uBlockGrid;
+uniform vec2 uDisplaySize;
+
+shared vec4 sPartial[64];
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    const uint lane = gl_LocalInvocationIndex;
+
+    vec4 acc = vec4(0.0);
+    if (all(lessThan(pos, uBlockGrid))) {
+        const vec2 flow = texelFetch(uFlow, pos, 0).xy;
+
+        // The game vectors averaged over the block's footprint, 4x4 samples.
+        const vec2 blockUv = (vec2(pos) + 0.5) / vec2(uBlockGrid);
+        const vec2 blockSize = 1.0 / vec2(uBlockGrid);
+        vec2 reference = vec2(0.0);
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 4; ++x) {
+                const vec2 uv = blockUv + (vec2(x, y) - 1.5) * 0.25 * blockSize;
+                reference += texture(uVelocity, uv).rg;
+            }
+        }
+        reference *= 1.0 / 16.0;
+
+        const float epe = length((flow - reference) * uDisplaySize);
+        acc = vec4(epe, 1.0, epe <= 1.0 ? 1.0 : 0.0, epe <= 2.0 ? 1.0 : 0.0);
+    }
+
+    sPartial[lane] = acc;
+    barrier();
+    for (uint stride = 32u; stride > 0u; stride >>= 1) {
+        if (lane < stride) sPartial[lane] += sPartial[lane + stride];
+        barrier();
+    }
+    if (lane == 0u) {
+        const uint group = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+        partials[group] = sPartial[0];
+    }
+}

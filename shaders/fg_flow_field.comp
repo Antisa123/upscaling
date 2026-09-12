@@ -1,0 +1,71 @@
+#version 460 core
+
+// M7, pass 5: the optical flow vector field.
+//
+// The same scatter as pass 3, from the other source of motion. Its value is
+// everything the rasteriser cannot describe: a shadow crossing a static floor,
+// a reflection sliding over a wall, a shading or texture animation. The game's
+// vectors say those pixels did not move; the image says they did, and for
+// interpolation the image is right.
+//
+// Two differences from the game field. The source is one vector per 8x8 luma
+// block, so it is read with a linear filter -- the block grid is a sampling of
+// a field, not a partition of one, and the seams between blocks are an artefact
+// of the estimator rather than a property of the motion. And there is no depth,
+// so the priority is built from what a block-matcher does know:
+//
+//   [15]     confident. The winning match's mean absolute luminance difference
+//            is below the threshold. A block that matched nothing in
+//            particular must never outrank one that matched well.
+//   [14:5]   magnitude. Larger wins. Where a moving object passes a static
+//            background the two motions compete for the same texels, and the
+//            moving one is the one that is actually in front.
+//   [4:0]    colour agreement along the vector, exactly as in pass 3.
+
+#include "fg_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uFlow;      // block grid: xy = UV, z = match error
+layout(binding = 1) uniform sampler2D uCurrent;
+layout(binding = 2) uniform sampler2D uPrevious;
+
+layout(r32ui, binding = 1) uniform uimage2D uFieldX;
+layout(r32ui, binding = 2) uniform uimage2D uFieldY;
+
+uniform vec2 uFieldSize;
+uniform vec2 uDisplaySize;
+// Match error above which a block counts as a failed match rather than a
+// measurement. The flow's own units: mean absolute luminance difference, where
+// a good match on this content scores around 0.02.
+uniform float uErrorThreshold;
+// Displacement, in display pixels, that saturates the magnitude priority.
+uniform float uMagnitudeScale;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, ivec2(uFieldSize)))) return;
+
+    const vec2 uv = (vec2(pos) + 0.5) / uFieldSize;
+    const vec4 sample_ = texture(uFlow, uv);
+    // w = 0 means the estimator produced nothing here: a scene cut, or a frame
+    // with no history yet.
+    if (sample_.w < 0.5) return;
+    const vec2 mv = sample_.xy;
+
+    const vec2 mid = uv + 0.5 * mv;
+    if (any(lessThan(mid, vec2(0.0))) || any(greaterThanEqual(mid, vec2(1.0)))) return;
+    const ivec2 target = clamp(ivec2(mid * uFieldSize), ivec2(0), ivec2(uFieldSize) - 1);
+
+    const uint confident = sample_.z <= uErrorThreshold ? 1u : 0u;
+    const float magnitude = length(mv * uDisplaySize);
+    const uint magBits = uint(clamp(1023.0 * magnitude / max(uMagnitudeScale, 1e-3), 0.0, 1023.0));
+
+    const float diff =
+        fgColorDistance(texture(uCurrent, uv).rgb, texture(uPrevious, uv + mv).rgb);
+    const uint colorBits = uint(clamp(31.0 * (1.0 - 4.0 * diff), 0.0, 31.0));
+
+    const uint priority = max((confident << 15) | (magBits << 5) | colorBits, 1u);
+    imageAtomicMax(uFieldX, target, fgPack(priority, mv.x));
+    imageAtomicMax(uFieldY, target, fgPack(priority, mv.y));
+}

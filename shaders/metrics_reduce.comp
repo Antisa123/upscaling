@@ -1,0 +1,70 @@
+#version 460 core
+
+// Tile reduction for image comparison. One workgroup handles a 16x16 tile and
+// writes a single partial sum; the CPU adds the partials up. Splitting the
+// reduction this way keeps float precision sane on large images.
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "metrics_common.glsl"
+
+layout(binding = 0) uniform sampler2D uA;
+layout(binding = 1) uniform sampler2D uB;
+layout(binding = 2) uniform sampler2D uVelocity;
+
+layout(std430, binding = 0) writeonly buffer Partials {
+    vec4 partials[];  // sumSquared, sumAbsolute, maxError, validPixelCount
+};
+
+uniform int uMode;     // 0 direct, 1 reproject B by the velocity buffer
+uniform int uTonemap;  // compare in display space rather than linear HDR
+uniform vec2 uSize;
+
+shared vec4 sPartial[gl_WorkGroupSize.x * gl_WorkGroupSize.y];
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    uint localIndex = gl_LocalInvocationIndex;
+
+    vec4 local = vec4(0.0);
+    if (coord.x < int(uSize.x) && coord.y < int(uSize.y)) {
+        vec2 uv = (vec2(coord) + 0.5) / uSize;
+        vec2 sampleUV = uv;
+        bool valid = true;
+
+        if (uMode == 1) {
+            sampleUV = uv + texture(uVelocity, uv).rg;
+            // Pixels reprojecting off-screen have no reference and would
+            // otherwise be scored against clamped edge texels.
+            valid = all(greaterThanEqual(sampleUV, vec2(0.0))) &&
+                    all(lessThanEqual(sampleUV, vec2(1.0)));
+        }
+
+        if (valid) {
+            vec3 a = metricsToDisplay(texture(uA, uv).rgb, uTonemap);
+            vec3 b = metricsToDisplay(texture(uB, sampleUV).rgb, uTonemap);
+            vec3 d = a - b;
+            local.x = dot(d, d);
+            local.y = abs(d.x) + abs(d.y) + abs(d.z);
+            local.z = max(max(abs(d.x), abs(d.y)), abs(d.z));
+            local.w = 1.0;
+        }
+    }
+
+    sPartial[localIndex] = local;
+    barrier();
+
+    for (uint stride = (gl_WorkGroupSize.x * gl_WorkGroupSize.y) / 2u; stride > 0u; stride >>= 1u) {
+        if (localIndex < stride) {
+            vec4 other = sPartial[localIndex + stride];
+            sPartial[localIndex].xy += other.xy;
+            sPartial[localIndex].z = max(sPartial[localIndex].z, other.z);
+            sPartial[localIndex].w += other.w;
+        }
+        barrier();
+    }
+
+    if (localIndex == 0u) {
+        uint groupIndex = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+        partials[groupIndex] = sPartial[0];
+    }
+}

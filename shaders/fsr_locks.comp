@@ -1,0 +1,86 @@
+#version 460 core
+
+// M5, pass 3: create locks.
+//
+// The colour rectification that keeps ghosting away is indiscriminate: it pulls
+// history towards the current frame's neighbourhood whether or not the history
+// was right. On a thin feature -- a chain link, a plant stem, the edge of a
+// drape, anything about one render pixel wide -- that is fatal. The feature
+// only lands on a render sample on some of the jitter phases, so on the frames
+// where it misses, the neighbourhood does not contain it, and the clamp deletes
+// the accumulated evidence that it exists. The result is a detail that flickers
+// in and out at the jitter period, which is far more objectionable than the
+// slight ghosting the clamp was protecting against.
+//
+// A lock marks such a pixel so the accumulation pass can relax the clamp there
+// for a few frames -- long enough for the jitter sequence to hit the feature
+// again and confirm it.
+//
+// Detection is FSR2's: the pixel is a strict luminance extremum along at least
+// one of the four directions through a 3x3 window. A one-pixel line is an
+// extremum across the line and not along it, which is exactly what separates it
+// from noise (extremum in every direction) and from an edge (extremum in none).
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uInput;  // render res, display-referred
+layout(r8, binding = 0) uniform writeonly image2D uOutput;
+
+uniform vec2 uInputSize;
+// Minimum luminance swing, relative to the window's own range, before a
+// candidate counts. Without it every pixel of a smooth gradient is a formal
+// extremum in some direction and the whole image locks.
+uniform float uLockContrast;
+
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 maxCoord = ivec2(uInputSize) - 1;
+    if (any(greaterThan(pos, maxCoord))) return;
+
+    float l[9];
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            l[(y + 1) * 3 + (x + 1)] =
+                luma(texelFetch(uInput, clamp(pos + ivec2(x, y), ivec2(0), maxCoord), 0).rgb);
+        }
+    }
+
+    const float c = l[4];
+    float lo = 1e30;
+    float hi = -1e30;
+    for (int i = 0; i < 9; ++i) {
+        lo = min(lo, l[i]);
+        hi = max(hi, l[i]);
+    }
+
+    // The four lines through the centre. Each is a triple (a, centre, b).
+    // Horizontal, vertical, and the two diagonals. (No trailing backslash in
+    // these comments: it is a line-continuation to the GLSL preprocessor and
+    // silently swallows the next line.)
+    const vec2 pairs[4] = vec2[4](vec2(l[3], l[5]),   // horizontal
+                                  vec2(l[1], l[7]),   // vertical
+                                  vec2(l[0], l[8]),   // down-right diagonal
+                                  vec2(l[2], l[6]));  // down-left diagonal
+
+    float best = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        const float a = pairs[i].x;
+        const float b = pairs[i].y;
+        // Strict extremum along this line, and how far it stands out. Using the
+        // nearer of the two neighbours keeps a step edge (where one side agrees
+        // with the centre) from qualifying.
+        const float swing = (c > max(a, b)) ? c - max(a, b)
+                          : (c < min(a, b)) ? min(a, b) - c
+                                            : 0.0;
+        best = max(best, swing);
+    }
+
+    // Normalised against the window's own range so the threshold means the same
+    // thing in a dark corner and in direct light. The pass runs on
+    // display-referred colour, which already carries the tone curve, but a
+    // 3x3 window can still span a factor of ten.
+    const float range = max(hi - lo, 1e-4);
+    imageStore(uOutput, pos, vec4(step(uLockContrast, best / range), 0.0, 0.0, 0.0));
+}

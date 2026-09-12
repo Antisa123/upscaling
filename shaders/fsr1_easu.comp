@@ -1,0 +1,166 @@
+#version 460 core
+
+// EASU — Edge Adaptive Spatial Upsampling, the first half of AMD FidelityFX
+// Super Resolution 1.
+//
+// Own implementation from the published algorithm description, not a copy of
+// ffx_fsr1.h. The structure is the one FSR1 specifies:
+//
+//   1. take a 12-tap window (a 4x4 neighbourhood minus its corners) around the
+//      resampled position;
+//   2. from four overlapping 5-tap crosses, estimate the local edge direction
+//      and how strongly the pixel is "edge-like" (len);
+//   3. turn that into an anisotropic kernel: stretched along the edge,
+//      narrowed across it;
+//   4. filter with a windowed lobe and clamp the result to the range of the
+//      four nearest taps, which removes ringing.
+//
+// The point of (3) is that an edge gets resampled *along* its own direction, so
+// a diagonal stays a diagonal instead of turning into a staircase. That is the
+// whole reason a spatial upscaler can beat bicubic, and it costs no history.
+//
+// Operates in display-referred space (see tonemap.comp): the limiter in step 4
+// and the contrast measure in step 2 both assume a peak of 1.0.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uInput;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform vec2 uInputSize;
+uniform vec2 uInvInputSize;
+uniform vec2 uOutputSize;
+
+vec3 fetchClamped(ivec2 p) {
+    return texelFetch(uInput, clamp(p, ivec2(0), ivec2(uInputSize) - 1), 0).rgb;
+}
+
+// FSR1's luma proxy: green-weighted, deliberately cheap and unnormalised. Only
+// ratios of it are ever used, so the missing normalisation does not matter.
+float easuLuma(vec3 c) {
+    return c.g + 0.5 * (c.r + c.b);
+}
+
+// One 5-tap cross:      a
+//                    b  c  d
+//                       e
+// Accumulates a weighted edge direction and edge strength for the quadrant
+// whose nearest texel is `c`. `w` is the bilinear weight of that quadrant, so
+// the four crosses blend smoothly as the sample position moves between texels.
+void easuSet(inout vec2 dir, inout float len, float w,
+             float a, float b, float c, float d, float e) {
+    // Horizontal: dirX is the signed gradient, lenX how much of the local
+    // contrast that gradient explains. A smooth ramp gives lenX near 1 (a real
+    // edge); noise gives lenX near 0 and is ignored.
+    float dirX = d - b;
+    float spanX = max(abs(d - c), abs(c - b));
+    float lenX = spanX > 0.0 ? clamp(abs(dirX) / spanX, 0.0, 1.0) : 0.0;
+    dir.x += dirX * w;
+    len += lenX * lenX * w;
+
+    float dirY = e - a;
+    float spanY = max(abs(e - c), abs(c - a));
+    float lenY = spanY > 0.0 ? clamp(abs(dirY) / spanY, 0.0, 1.0) : 0.0;
+    dir.y += dirY * w;
+    len += lenY * lenY * w;
+}
+
+// Windowed lobe evaluated in the rotated, anisotropically scaled frame.
+// `lob` controls how far the negative lobe reaches (sharper for edge pixels),
+// `clp` clamps the squared distance so the far taps cannot re-enter the
+// positive part of the window.
+void easuTap(inout vec3 accum, inout float accumW, vec2 offset, vec2 dir, vec2 len2,
+             float lob, float clp, vec3 color) {
+    vec2 v = vec2(dot(offset, dir), dot(offset, vec2(-dir.y, dir.x)));
+    v *= len2;
+    float d2 = min(dot(v, v), clp);
+
+    float wB = 2.0 / 5.0 * d2 - 1.0;
+    float wA = lob * d2 - 1.0;
+    wB *= wB;
+    wA *= wA;
+    wB = 1.5625 * wB - 0.5625;
+    float w = wB * wA;
+
+    accum += color * w;
+    accumW += w;
+}
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, ivec2(uOutputSize)))) return;
+
+    vec2 srcPos = (vec2(pos) + 0.5) * (uInputSize / uOutputSize) - 0.5;
+    ivec2 base = ivec2(floor(srcPos));
+    vec2 pp = srcPos - vec2(base);
+
+    // 4x4 minus corners:      b c
+    //                       e f g h
+    //                       i j k l
+    //                         n o
+    // f, g, j, k are the four texels the sample position sits between.
+    vec3 b = fetchClamped(base + ivec2(0, -1));
+    vec3 c = fetchClamped(base + ivec2(1, -1));
+    vec3 e = fetchClamped(base + ivec2(-1, 0));
+    vec3 f = fetchClamped(base + ivec2(0, 0));
+    vec3 g = fetchClamped(base + ivec2(1, 0));
+    vec3 h = fetchClamped(base + ivec2(2, 0));
+    vec3 i = fetchClamped(base + ivec2(-1, 1));
+    vec3 j = fetchClamped(base + ivec2(0, 1));
+    vec3 k = fetchClamped(base + ivec2(1, 1));
+    vec3 l = fetchClamped(base + ivec2(2, 1));
+    vec3 n = fetchClamped(base + ivec2(0, 2));
+    vec3 o = fetchClamped(base + ivec2(1, 2));
+
+    float bL = easuLuma(b), cL = easuLuma(c), eL = easuLuma(e), fL = easuLuma(f);
+    float gL = easuLuma(g), hL = easuLuma(h), iL = easuLuma(i), jL = easuLuma(j);
+    float kL = easuLuma(k), lL = easuLuma(l), nL = easuLuma(n), oL = easuLuma(o);
+
+    vec2 dir = vec2(0.0);
+    float len = 0.0;
+    easuSet(dir, len, (1.0 - pp.x) * (1.0 - pp.y), bL, eL, fL, gL, jL);  // around f
+    easuSet(dir, len, pp.x * (1.0 - pp.y), cL, fL, gL, hL, kL);          // around g
+    easuSet(dir, len, (1.0 - pp.x) * pp.y, fL, iL, jL, kL, nL);          // around j
+    easuSet(dir, len, pp.x * pp.y, gL, jL, kL, lL, oL);                  // around k
+
+    // Normalise the direction; a flat region has no direction, so fall back to
+    // the horizontal axis, where the kernel degenerates to something isotropic.
+    float dirLen2 = dot(dir, dir);
+    bool isFlat = dirLen2 < 1.0 / 32768.0;
+    dir = isFlat ? vec2(1.0, 0.0) : dir * inversesqrt(dirLen2);
+
+    len = len * 0.5;
+    len *= len;
+
+    // Stretch is 1 on an axis-aligned edge and sqrt(2) on a perfect diagonal:
+    // a diagonal edge covers more texels per unit length, so its kernel has to
+    // reach further to see the same amount of signal.
+    float stretch = 1.0 / max(abs(dir.x), abs(dir.y));
+    vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);
+    float lob = 0.5 + (0.25 - 0.04 - 0.5) * len;
+    float clp = 1.0 / lob;
+
+    vec3 accum = vec3(0.0);
+    float accumW = 0.0;
+    easuTap(accum, accumW, vec2(0.0, -1.0) - pp, dir, len2, lob, clp, b);
+    easuTap(accum, accumW, vec2(1.0, -1.0) - pp, dir, len2, lob, clp, c);
+    easuTap(accum, accumW, vec2(-1.0, 0.0) - pp, dir, len2, lob, clp, e);
+    easuTap(accum, accumW, vec2(0.0, 0.0) - pp, dir, len2, lob, clp, f);
+    easuTap(accum, accumW, vec2(1.0, 0.0) - pp, dir, len2, lob, clp, g);
+    easuTap(accum, accumW, vec2(2.0, 0.0) - pp, dir, len2, lob, clp, h);
+    easuTap(accum, accumW, vec2(-1.0, 1.0) - pp, dir, len2, lob, clp, i);
+    easuTap(accum, accumW, vec2(0.0, 1.0) - pp, dir, len2, lob, clp, j);
+    easuTap(accum, accumW, vec2(1.0, 1.0) - pp, dir, len2, lob, clp, k);
+    easuTap(accum, accumW, vec2(2.0, 1.0) - pp, dir, len2, lob, clp, l);
+    easuTap(accum, accumW, vec2(0.0, 2.0) - pp, dir, len2, lob, clp, n);
+    easuTap(accum, accumW, vec2(1.0, 2.0) - pp, dir, len2, lob, clp, o);
+
+    // Deringing: the filter may only produce values the four nearest taps
+    // already bracket. This is what keeps the sharpening from haloing.
+    vec3 lo = min(min(f, g), min(j, k));
+    vec3 hi = max(max(f, g), max(j, k));
+    vec3 result = accumW != 0.0 ? accum / accumW : f;
+    result = clamp(result, lo, hi);
+
+    imageStore(uOutput, pos, vec4(result, 1.0));
+}

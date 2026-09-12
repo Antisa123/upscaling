@@ -1,0 +1,91 @@
+#version 460 core
+
+// M7, pass 3: the game motion vector field.
+//
+// Same scatter as the depth pass, but carrying the vector itself, and with a
+// priority that decides who owns a contested texel. The field it produces is
+// holey by construction and that is expected: where the image stretches
+// (a surface turning towards the camera, anything moving apart) there are
+// simply fewer source pixels than target texels. Pass 4 fills those holes.
+//
+// Priority, 16 bits, most significant first -- the order is the whole design,
+// because imageAtomicMax compares the bits as one number:
+//
+//   [15]     primary. Set when this pixel is the surface the depth pass found
+//            to be nearest at the target texel. A foreground surface and the
+//            wall behind it can both scatter to the same place; only one of
+//            them is visible there, and no amount of depth or colour evidence
+//            should let the hidden one win.
+//   [14:5]   depth. Nearer is higher. Among primary candidates this is a
+//            tie-break of last resort; among secondary ones it is the whole
+//            ordering.
+//   [4:0]    colour agreement. How well the current frame at this pixel
+//            matches the previous frame at the far end of the vector. A vector
+//            that does not explain the colour change is a vector that will
+//            produce a visible seam, so it yields to one that does.
+//
+// Five bits of colour is not a shortage: this is a tie-break between candidates
+// that already agree on visibility and depth, and the difference between the
+// 27th and 28th thirty-second of agreement decides nothing.
+
+#include "fg_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uDilated;
+layout(binding = 1) uniform sampler2D uVelocity;
+layout(binding = 2) uniform sampler2D uDepthInfo;
+layout(binding = 3) uniform sampler2D uCurrent;   // display res, display-referred
+layout(binding = 4) uniform sampler2D uPrevious;
+
+layout(r32ui, binding = 0) uniform readonly uimage2D uDepthField;
+layout(r32ui, binding = 1) uniform uimage2D uFieldX;
+layout(r32ui, binding = 2) uniform uimage2D uFieldY;
+
+uniform vec2 uRenderSize;
+uniform vec2 uFieldSize;
+uniform int uHasDilated;
+// Relative depth agreement required before a candidate counts as the visible
+// surface at its target texel. The same number the upscaler's disocclusion
+// test uses, and for the same reason: perspective makes an absolute threshold
+// meaningless.
+uniform float uDepthTolerance;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, ivec2(uRenderSize)))) return;
+
+    vec2 mv;
+    float z;
+    if (uHasDilated != 0) {
+        const vec4 d = texelFetch(uDilated, pos, 0);
+        mv = d.xy;
+        z = d.w;
+    } else {
+        mv = texelFetch(uVelocity, pos, 0).rg;
+        z = texelFetch(uDepthInfo, pos, 0).x;
+    }
+
+    const vec2 uv = (vec2(pos) + 0.5) / uRenderSize;
+    const vec2 mid = uv + 0.5 * mv;
+    if (any(lessThan(mid, vec2(0.0))) || any(greaterThanEqual(mid, vec2(1.0)))) return;
+    const ivec2 target = clamp(ivec2(mid * uFieldSize), ivec2(0), ivec2(uFieldSize) - 1);
+
+    const uint packedDepth = imageLoad(uDepthField, target).x;
+    const float nearest = packedDepth == 0xFFFFFFFFu ? z : uintBitsToFloat(packedDepth);
+    const uint primary = z <= nearest * (1.0 + uDepthTolerance) ? 1u : 0u;
+
+    // 1023 / (1 + z) is monotone in distance and needs no scene-dependent
+    // normalisation: only the ordering matters, and any positive decreasing
+    // function of distance produces the same one.
+    const uint depthBits = uint(clamp(1023.0 / (1.0 + z), 0.0, 1023.0));
+
+    const vec2 prevUV = uv + mv;
+    const float diff =
+        fgColorDistance(texture(uCurrent, uv).rgb, texture(uPrevious, prevUV).rgb);
+    const uint colorBits = uint(clamp(31.0 * (1.0 - 4.0 * diff), 0.0, 31.0));
+
+    const uint priority = max((primary << 15) | (depthBits << 5) | colorBits, 1u);
+    imageAtomicMax(uFieldX, target, fgPack(priority, mv.x));
+    imageAtomicMax(uFieldY, target, fgPack(priority, mv.y));
+}

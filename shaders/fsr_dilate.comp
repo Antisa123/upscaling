@@ -1,0 +1,99 @@
+#version 460 core
+
+// M5, pass 1 of the full upscaler: reconstruct & dilate + depth clip.
+//
+// Two jobs that want the same 3x3 depth neighbourhood, so they share a pass:
+//
+//   1. **Dilation.** A motion vector is correct for the surface the pixel
+//      actually covers. On a silhouette the render-resolution pixel covers two
+//      surfaces and stores one of them, and the display-resolution pixel that
+//      reprojects with it may belong to the other. Taking the vector of the
+//      *nearest* neighbour in a 3x3 window biases every edge pixel towards the
+//      foreground, which is the surface whose motion is visually dominant and
+//      whose trailing edge is where ghosting is actually seen.
+//
+//   2. **Disocclusion.** The G-buffer writes, per pixel, this frame's linear
+//      view distance and the distance the same surface point had last frame
+//      (both are just clip.w under the reverse-Z infinite projection). If the
+//      motion vector points at a surface that was really there, the previous
+//      frame's depth buffer at that position agrees with the second number.
+//      If it disagrees, the pixel was hidden last frame and its history is
+//      somebody else's colour.
+//
+// Output: xy = dilated motion vector, z = disocclusion in [0,1] (1 = throw the
+// history away), w = dilated linear depth, which the lock pass reuses.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uVelocity;       // render res, RG16F, UV space
+layout(binding = 1) uniform sampler2D uDepthInfo;      // render res, RG32F, (curZ, prevZ)
+layout(binding = 2) uniform sampler2D uPrevDepthInfo;  // the same, last frame
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform vec2 uInputSize;
+uniform vec2 uInvInputSize;
+// Depth mismatch tolerated before a pixel counts as disoccluded, relative to
+// its distance. Perspective makes an absolute threshold meaningless: 5 cm is a
+// different fraction of a pixel's depth at 1 m than at 50 m.
+uniform float uDepthTolerance;
+// 0 collapses the search window to the centre pixel, i.e. no dilation at all.
+// The ablation row needs it separable from the depth test, which shares the
+// same neighbourhood.
+uniform int uDilate;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 maxCoord = ivec2(uInputSize) - 1;
+    if (any(greaterThan(pos, maxCoord))) return;
+
+    // Nearest surface in the 3x3 window, plus how far the window spans in
+    // depth. The span is the local slope: on a floor seen at a grazing angle
+    // neighbouring pixels are legitimately metres apart, and a fixed tolerance
+    // would call the whole floor disoccluded every frame.
+    float nearestZ = 1e30;
+    float farthestZ = 0.0;
+    ivec2 nearestPos = pos;
+    const int radius = uDilate != 0 ? 1 : 0;
+    for (int dy = -radius; dy <= radius; ++dy) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+            const ivec2 q = clamp(pos + ivec2(dx, dy), ivec2(0), maxCoord);
+            const float z = texelFetch(uDepthInfo, q, 0).x;
+            farthestZ = max(farthestZ, z);
+            if (z < nearestZ) {
+                nearestZ = z;
+                nearestPos = q;
+            }
+        }
+    }
+
+    const vec2 mv = texelFetch(uVelocity, nearestPos, 0).rg;
+    // Where the nearest neighbour's surface was last frame, in distance. This
+    // is the prediction; the previous depth buffer is the observation.
+    const float expectedPrevZ = texelFetch(uDepthInfo, nearestPos, 0).y;
+
+    const vec2 uv = (vec2(pos) + 0.5) * uInvInputSize;
+    const vec2 prevUV = uv + mv;
+
+    float disocclusion;
+    if (any(lessThan(prevUV, vec2(0.0))) || any(greaterThan(prevUV, vec2(1.0)))) {
+        // Off-screen last frame: there is no history, not even a wrong one.
+        disocclusion = 1.0;
+    } else {
+        // Closest of the four texels the vector lands between. A half-pixel
+        // misalignment on a silhouette would otherwise read the background and
+        // report a disocclusion on a surface that never moved.
+        const vec4 gathered = textureGather(uPrevDepthInfo, prevUV, 0);
+        const float prevZ = min(min(gathered.x, gathered.y), min(gathered.z, gathered.w));
+
+        const float slope = max(farthestZ - nearestZ, 0.0);
+        const float tolerance = uDepthTolerance * expectedPrevZ + slope;
+        const float diff = abs(prevZ - expectedPrevZ);
+        // Ramps from 0 to 1 over one further tolerance width, so a surface that
+        // is marginally out of agreement loses part of its history rather than
+        // all of it. A hard threshold shows up as a crawling one-pixel line
+        // along every silhouette.
+        disocclusion = clamp(diff / max(tolerance, 1e-6) - 1.0, 0.0, 1.0);
+    }
+
+    imageStore(uOutput, pos, vec4(mv, disocclusion, nearestZ));
+}

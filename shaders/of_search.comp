@@ -1,0 +1,129 @@
+#version 460 core
+
+// M6, pass 4: block matching search, one pyramid level.
+//
+// One workgroup per 8x8 block, 64 threads. The block's own luminance and the
+// whole search window from the previous frame are staged in shared memory
+// first, so the (2R+1)^2 candidate evaluations read from LDS instead of
+// re-fetching the same texels a hundred times each -- the window is read
+// (2R+1)^2 times over if done naively, and that ratio is the difference
+// between a pass that is bandwidth-bound and one that is ALU-bound.
+//
+// The criterion is the sum of absolute luminance differences. SAD rather than
+// SSD because it is what FfxOpticalFlow uses and because it is robust: a
+// single specular pixel that changed a lot should not be able to veto an
+// otherwise perfect match, and squaring gives it exactly that power.
+//
+// Vectors are carried in UV space of the full image at every level. A UV
+// displacement is resolution independent, so the coarse-to-fine chain needs no
+// multiply-by-two anywhere and the whole class of "which level is this vector
+// in" bugs cannot happen. The search itself stays integer: the prediction is
+// rounded to this level's texel grid on entry, and the refinement is an
+// integer offset on top of it, so nothing drifts as it descends the pyramid.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uCur;        // luma pyramid, this frame
+layout(binding = 1) uniform sampler2D uPrev;       // luma pyramid, last frame
+layout(binding = 2) uniform sampler2D uPredicted;  // flow from the coarser level
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+layout(std430, binding = 1) readonly buffer SceneChange {
+    uint sceneChanged;
+    float difference;
+};
+
+uniform int uLevel;
+uniform ivec2 uLevelSize;   // luma texels at this level
+uniform ivec2 uBlockGrid;   // blocks at this level
+uniform int uRadius;        // search radius in texels of this level
+uniform int uHasPredicted;  // 0 at the coarsest level: start from zero motion
+// Penalty per texel of distance from the predicted vector, in units of mean
+// absolute luminance. Block matching is ill-posed inside a flat region -- every
+// candidate scores the same -- and without a tie-break the winner there is
+// whichever candidate the reduction happened to see first. This makes the
+// answer "whatever the coarser level said", which is the correct prior.
+uniform float uSmoothness;
+
+const int kBlock = 8;
+const int kMaxRadius = 8;
+const int kMaxWindow = kBlock + 2 * kMaxRadius;
+
+shared float sCur[kBlock * kBlock];
+shared float sPrev[kMaxWindow * kMaxWindow];
+shared float sBestSad[64];
+shared int sBestOff[64];
+
+void main() {
+    const ivec2 block = ivec2(gl_WorkGroupID.xy);
+    if (any(greaterThanEqual(block, uBlockGrid))) return;
+    const uint lane = gl_LocalInvocationIndex;
+
+    if (sceneChanged != 0u) {
+        if (lane == 0u) imageStore(uOutput, block, vec4(0.0));
+        return;
+    }
+
+    const int radius = clamp(uRadius, 1, kMaxRadius);
+    const int window = kBlock + 2 * radius;
+    const ivec2 origin = block * kBlock;
+    const ivec2 maxCoord = uLevelSize - 1;
+
+    // The prediction, rounded onto this level's texel grid.
+    vec2 predicted = vec2(0.0);
+    if (uHasPredicted != 0)
+        predicted = texelFetch(uPredicted, block, 0).xy;
+    const ivec2 basePx = ivec2(round(predicted * vec2(uLevelSize)));
+
+    if (lane < uint(kBlock * kBlock)) {
+        const ivec2 p = ivec2(int(lane) % kBlock, int(lane) / kBlock);
+        sCur[lane] = texelFetch(uCur, min(origin + p, maxCoord), uLevel).r;
+    }
+    const ivec2 winOrigin = origin + basePx - ivec2(radius);
+    for (int i = int(lane); i < window * window; i += 64) {
+        const ivec2 p = ivec2(i % window, i / window);
+        sPrev[i] = texelFetch(uPrev, clamp(winOrigin + p, ivec2(0), maxCoord), uLevel).r;
+    }
+    barrier();
+
+    const int span = 2 * radius + 1;
+    const int candidates = span * span;
+    float bestSad = 1e30;
+    int bestOff = 0;
+    for (int c = int(lane); c < candidates; c += 64) {
+        const int dx = c % span - radius;
+        const int dy = c / span - radius;
+        float sad = 0.0;
+        for (int y = 0; y < kBlock; ++y) {
+            const int row = (y + dy + radius) * window + dx + radius;
+            for (int x = 0; x < kBlock; ++x)
+                sad += abs(sCur[y * kBlock + x] - sPrev[row + x]);
+        }
+        sad = sad / float(kBlock * kBlock) +
+              uSmoothness * sqrt(float(dx * dx + dy * dy));
+        if (sad < bestSad) {
+            bestSad = sad;
+            bestOff = (dy + kMaxRadius) * 64 + (dx + kMaxRadius);
+        }
+    }
+    sBestSad[lane] = bestSad;
+    sBestOff[lane] = bestOff;
+    barrier();
+
+    for (uint stride = 32u; stride > 0u; stride >>= 1) {
+        if (lane < stride && sBestSad[lane + stride] < sBestSad[lane]) {
+            sBestSad[lane] = sBestSad[lane + stride];
+            sBestOff[lane] = sBestOff[lane + stride];
+        }
+        barrier();
+    }
+
+    if (lane == 0u) {
+        const int bestPacked = sBestOff[0];
+        const ivec2 off = ivec2(bestPacked % 64, bestPacked / 64) - ivec2(kMaxRadius);
+        const vec2 mv = vec2(basePx + off) / vec2(uLevelSize);
+        // z carries the match error so the upscale pass and, later, frame
+        // generation can tell a confident vector from a guess.
+        imageStore(uOutput, block, vec4(mv, sBestSad[0], 1.0));
+    }
+}

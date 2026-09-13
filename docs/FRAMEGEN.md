@@ -63,6 +63,9 @@ drugo).
 | 7 | `fg_interpolate.comp` | prikazna | dva warpa po polju, izbor između polja po slaganju boja; alfa = pokrivenost |
 | 8 | `fg_inpaint_pyramid.comp` | ½ prikazne, ×N | piramida slike množena pokrivenošću (premultiplied), rupe ne ulaze u vlastitu ispunu |
 | 9 | `fg_inpaint.comp` | prikazna | piksel s pokrivenošću < 1 miješa se s najfinijom razinom piramide koja ima dovoljno pokrivenosti |
+| 10 | `fg_ml_features.comp` | prikazna | samo uz `--fg-ml` (M9): 20 značajki po pikselu i prvi sloj mreže |
+| 11 | `ml_resample.comp`, `ml_conv.comp` | ½, ¼ prikazne | ostatak U-Net-lite mreže |
+| 12 | `fg_ml_blend.comp` | prikazna | softmax težine nad sedam kandidata zamjenjuju izlaz prolaza 7–9; vidi `docs/ML.md` |
 | — | `fg_blend.comp` | prikazna | mjerenje: naivni 50/50 blend istog para |
 
 Polja su u **render razlučivosti**: scatter tamo ima točno jedan izvorni piksel

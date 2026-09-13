@@ -10,7 +10,17 @@ i koliko to košta na GPU-u bez podrške za tenzore.**
 Opcija (a) iz `PLAN.md` (Modul E): blend/inpainting maska, ne naučeni
 upsampling.
 
-<!-- REZULTATI: sažetak se upisuje nakon mjerenja -->
+**Ukratko.** Mreža od 7 199 parametara (c8-c16), učena na vlastitom rendereru
+i izvedena u compute shaderima, na svih osam mjernih pogleda podiže SSIM, a
+PSNR na sedam od osam, za +0,03 do +0,20 dB (1080p Quality: 35,00 → 35,10 dB).
+Dobitak je stabilan preko tri sjemena, ali malen, ne popravlja sustavno najgori
+okvir i ne prenosi se na neviđenu scenu. Plaća se 2,7 ms GPU-a po okviru na
+1080p (generiranje okvira 1,84 → 4,58 ms), što pri sintetskom opterećenju ×12
+spušta prikazani FPS s 147 na 120 i dodaje ~5 ms latencije. **Na ovom
+hardveru ne isplati se**: heuristika je 0,10 dB lošija za 40 % cijene
+generiranja okvira (1,84 naspram 4,58 ms). Vrijedi
+kao izmjeren odgovor na pitanje teme — gdje je granica malog naučenog modela
+bez tenzorskih jedinica — a ne kao zamjena jezgre.
 
 ## Pokretanje
 
@@ -218,10 +228,196 @@ pogledi iz `run_metrics.py` ocjenjuju se jednom, izabranim modelom.
 
 Snimka napravljena **s učitanom mrežom** (`--fg-ml … --ml-dump …`) u svakom
 patchu nosi i izlaz shadera. `fg_train eval` na njoj izvodi vlastiti
-unaprijedni prolaz i uspoređuje: na unutarnjem dijelu (rub 28 px, izvan
-receptivnog polja ruba patcha) srednja apsolutna razlika je 6,9·10⁻⁵, najveća
-4,9·10⁻⁴ — zaokruživanje half-floata. Bez te provjere greška u redoslijedu
-stupaca `mat4`-a ili u poravnanju poolinga davala bi mrežu koja „radi“ i
-tiho gubi.
+unaprijedni prolaz i uspoređuje na pikselima izvan receptivnog polja ruba
+patcha (28 px), a uz rub samog okvira na svim pikselima. Za izabrani model
+srednja apsolutna razlika je 7,1·10⁻⁵, najveća 4,7·10⁻⁴ — zaokruživanje
+half-floata. Isti broj (6,9·10⁻⁵ / 4,9·10⁻⁴) dala je provjera prvog modela
+prije i poslije preslagivanja prolaza, pa preslagivanje nije promijenilo
+funkciju. Bez ove provjere greška u redoslijedu stupaca `mat4`-a ili u
+poravnanju poolinga davala bi mrežu koja „radi“ i tiho gubi.
 
-<!-- REZULTATI, CIJENA, REPRODUKCIJA: nakon mjerenja -->
+## Rezultati
+
+### Izbor modela: validacijske putanje, cijeli okviri
+
+Šest modela c8-c16 (`scripts/ml_sweep.sh`): dva gubitka × tri sjemena, svi na
+18 putanja. PSNR u dB i dobitak naspram heuristike; nijedna od ovih putanja
+nije ni u skupu za učenje ni među mjernim pogledima.
+
+| Model | Sponza r4, 30 fps | proc. t80, 60 fps | Sponza r2, 20 fps | proc. t100, 20 fps | srednji dobitak |
+|---|---|---|---|---|---|
+| heuristika | 47,14 | 34,01 | 33,34 | 32,81 | — |
+| Charbonnier, sjeme 1 | 48,00 (+0,86) | 34,27 (+0,26) | 33,41 (+0,07) | 33,23 (+0,42) | **+0,40** |
+| Charbonnier, sjeme 2 | 47,77 (+0,63) | 34,25 (+0,24) | 33,45 (+0,11) | 33,19 (+0,38) | +0,34 |
+| Charbonnier, sjeme 3 | 47,71 (+0,57) | 34,33 (+0,32) | 33,42 (+0,08) | 33,20 (+0,39) | +0,34 |
+| MSE, sjeme 1 | 46,76 (−0,38) | 34,12 (+0,11) | 33,37 (+0,03) | 33,08 (+0,27) | +0,01 |
+| MSE, sjeme 2 | 46,11 (−1,03) | 34,10 (+0,09) | 33,35 (+0,01) | 33,04 (+0,23) | −0,18 |
+| MSE, sjeme 3 | 46,74 (−0,40) | 34,10 (+0,09) | 33,35 (+0,01) | 33,01 (+0,20) | −0,03 |
+
+Gubitak je odlučio, sjeme nije: sva tri Charbonnier modela dobivaju na sve četiri
+putanje, a sva tri MSE modela gube na Sponzi. Suprotno očekivanju, MSE —
+gubitak koji PSNR mjeri — daje lošiji PSNR. Vjerojatno objašnjenje, **koje nije
+zasebno provjereno**: gradijent MSE-a proporcionalan je pogrešci, pa je uz istu
+stopu učenja na malim pogreškama (većina piksela) gotovo nula i učenje vode
+rijetke velike pogreške, dok Charbonnier svakom pikselu daje signal
+podjednake jačine. Provjera bi tražila MSE uz veću stopu učenja ili dulje
+učenje; to nije napravljeno. Izabran je model s najvećim srednjim dobitkom na validaciji
+(Charbonnier, sjeme 1) i on je `captures/ml/weights/blend-c8-c16.bin`.
+
+### Mjerni pogledi (izabrani model, mjereno jednom)
+
+`scripts/run_metrics.py --group fg-ml`: isti pogledi, okviri i zastavice kao
+tablice M7/M8 (`--jitter`); stupac heuristike reproducira te tablice na
+drugu decimalu.
+
+| Pogled | Heuristika PSNR / SSIM | Mreža PSNR / SSIM | Dobitak | Najgori okvir (heur. → mreža) |
+|---|---|---|---|---|
+| 1080p Quality (1,5×) | 35,00 / 0,9443 | 35,10 / 0,9458 | +0,10 dB / +0,0016 | 27,56 → 27,62 |
+| 1080p native | 36,50 / 0,9628 | 36,69 / 0,9650 | +0,19 dB / +0,0022 | 27,88 → 27,10 |
+| 1080p Performance (2×) | 33,55 / 0,9166 | 33,58 / 0,9176 | +0,03 dB / +0,0010 | 27,40 → 27,33 |
+| 720p Quality | 33,95 / 0,9293 | 33,98 / 0,9307 | +0,03 dB / +0,0014 | 27,43 → 27,57 |
+| proceduralna scena | 34,06 / 0,9708 | 34,26 / 0,9722 | +0,20 dB / +0,0015 | 33,74 → 33,87 |
+| 120 fps | 35,94 / 0,9553 | 36,03 / 0,9568 | +0,09 dB / +0,0014 | 31,23 → 30,28 |
+| 30 fps | 32,85 / 0,9309 | 32,83 / 0,9337 | −0,02 dB / +0,0028 | 24,11 → 23,71 |
+| 20 fps | 30,95 / 0,9122 | 31,11 / 0,9181 | +0,16 dB / +0,0058 | 20,23 → 20,71 |
+
+Što tablica kaže:
+
+- **Dobitak je malen i dosljedan.** SSIM raste na svih osam pogleda, PSNR na
+  sedam (30 fps: −0,02 dB). Najveći je tamo gdje kandidati nose najviše
+  informacije — native render i proceduralna scena s objektima u pokretu — a
+  najmanji uz Performance i 720p, gdje su svi kandidati jednako mutni i pravilo
+  miješanja ima malo izbora.
+- **Najgori okvir se ne popravlja sustavno** (native −0,78 dB, 120 fps
+  −0,95 dB, 20 fps +0,48 dB). Mreža uči prosjek; rijetki okviri s brzim
+  zamahom kamere u skupu su za učenje zastupljeni koliko su i rijetki.
+- **Mjera nakon prvog modela.** Prvi model (prije ispravka ruba okvira i
+  proširenja skupa) na istim je pogledima gubio 0,16 dB na 30 fps i 0,39 dB na
+  20 fps. Dodane putanje od 20/30 fps odabrane su gledajući taj rezultat;
+  izbor između modela nakon toga napravljen je samo na validaciji.
+
+### Ovisnost o sjemenu (mjerni pogledi)
+
+Ista tri Charbonnier modela sa sweepa, na 1080p Quality i proceduralnoj sceni
+(`--group fg-ml-models`):
+
+| Model | Sponza PSNR / SSIM | najgori okvir | proceduralna PSNR / SSIM | najgori okvir |
+|---|---|---|---|---|
+| heuristika | 35,00 / 0,9443 | 27,56 | 34,06 / 0,9708 | 33,74 |
+| sjeme 1 (izabrano) | 35,10 / 0,9458 | 27,62 | 34,26 / 0,9722 | 33,87 |
+| sjeme 2 | 35,20 / 0,9470 | 25,99 | 34,27 / 0,9724 | 33,85 |
+| sjeme 3 | 35,13 / 0,9466 | 25,68 | 34,37 / 0,9729 | 33,93 |
+
+Srednji dobitak ne ovisi o sjemenu: sva tri modela su iznad heuristike na oba
+pogleda (+0,10 do +0,20 dB na Sponzi, +0,20 do +0,31 dB na proceduralnoj
+sceni), pa je rezultat svojstvo metode, a ne sretnog izvlačenja. Najgori okvir
+Sponze ovisi: sjeme 1 ga zadrži, sjemena 2 i 3 ga spuste za ~1,7 dB. Izabrani
+model nije biran po tome — validacija ga je izabrala prije ovog mjerenja — ali
+ni ne smije se čitati kao dokaz da mreža čuva najgori okvir.
+
+### Veličina mreže i skup podataka (mjerni pogledi)
+
+Svi Charbonnier, sjeme 1, 12 000 koraka (`scripts/ml_train.sh`).
+
+| Model | parametara | Sponza PSNR / SSIM | najgori okvir | proceduralna PSNR / SSIM |
+|---|---|---|---|---|
+| heuristika | — | 35,00 / 0,9443 | 27,56 | 34,06 / 0,9708 |
+| c4-c8 | 1 875 | 34,91 / 0,9455 | 25,26 | 34,15 / 0,9715 |
+| **c8-c16** | 7 199 | 35,10 / 0,9458 | 27,62 | 34,26 / 0,9722 |
+| c12-c24 | 15 979 | 35,18 / 0,9462 | 28,92 | 34,36 / 0,9729 |
+| c8-c16, samo Sponza | 7 199 | 35,05 / 0,9460 | 26,01 | 34,05 / 0,9707 |
+
+- **Kapacitet se vidi.** Najmanja mreža na Sponzi pada ispod heuristike (SSIM
+  joj je ipak viši), najveća je najbolja na oba pogleda i jedina podiže najgori
+  okvir (+1,4 dB). Razlike između c8-c16 i c12-c24 (0,08–0,10 dB) manje su od
+  raspona sjemena iz prethodne tablice, pa rang tih dviju nije siguran; rang
+  c4-c8 ispod njih jest.
+- **Neviđena scena ne dobiva ništa.** Model učen samo na Sponzi na
+  proceduralnoj sceni daje heuristiku (34,05 naspram 34,06 dB): ne šteti, ali
+  ono što je naučio o Sponzinim kandidatima ne prenosi se na scenu s
+  pokretnim objektima i drugom vrstom disokluzije. Dobitak glavnog modela na
+  proceduralnoj sceni (+0,20 dB) dolazi iz drugih dijelova iste animacije u
+  skupu za učenje. Na Sponzi mu model sa svih putanja donosi +0,05 dB više,
+  unutar raspona sjemena.
+
+## Cijena
+
+### GPU po prolazu (1080p Quality, Sponza, 300 okvira, mirno računalo)
+
+| Prolaz | c4-c8 | c8-c16 | c12-c24 |
+|---|---|---|---|
+| značajke + enc0 | 0,49 | 0,57 | 0,69 |
+| pool0 | 0,11 | 0,22 | 0,33 |
+| enc1 | 0,08 | 0,25 | 0,55 |
+| pool1 | 0,06 | 0,12 | 0,17 |
+| enc2 | 0,05 | 0,15 | 0,33 |
+| enc3 | 0,05 | 0,15 | 0,32 |
+| up1 + skip | 0,11 | 0,22 | 0,34 |
+| dec1 | 0,11 | 0,39 | 0,75 |
+| dec0 + mješavina | 0,57 | 0,68 | 0,78 |
+| **naučeni dio ukupno** | **1,62** | **2,75** | **4,28** |
+| **generiranje okvira** (heuristika 1,84) | 3,45 | 4,58 | 6,10 |
+
+Na 720p Quality c8-c16 košta 1,23 ms (generiranje okvira 0,83 → 2,06 ms).
+
+Dva prolaza ne ovise o širini mreže: značajke i mješavina oba dohvaćaju sedam
+kandidata i dva vektorska polja po pikselu pune rezolucije, ukupno ~1,1 ms za
+najmanju mrežu. To je donja granica ovog oblika modela na 1080p, i razlog zašto
+je i c4-c8 skoro dvostruko skuplji od cijele heuristike.
+
+### Prikaz u stvarnom vremenu (1080p Quality, ravnomjerni pacing)
+
+`--run-seconds 8 --load N`, iste zastavice kao `docs/PACING.md`; snimke u
+`captures/ml/realtime/`. Brojevi su iz sažetka same aplikacije u istoj sesiji
+(stupac bez FG-a zato nije identičan tablici M8, koja odbacuje prve okvire).
+
+| Opterećenje | bez FG | FG, heuristika | FG, mreža | latencija do pravog okvira (heur. / mreža) |
+|---|---|---|---|---|
+| ×0 | 344 fps | 325 fps | 215 fps | 9,1 / 13,8 ms |
+| ×12 | 90 fps | 147 fps | 120 fps | 20,2 / 25,0 ms |
+| ×24 | 55 fps | 93 fps | 84 fps | 32,0 / 35,6 ms |
+
+Uz opterećenje generiranje okvira s mrežom i dalje diže FPS (×12: +34 % naspram
+bez FG-a), ali heuristika ga diže gotovo dvostruko više (+64 %). Na neopterećenoj
+sceni mreža pomiče prag isplativosti: FG s njom gubi više od trećine FPS-a
+(344 → 215 fps), a heuristika 6 %.
+
+### Isplati li se
+
+Ne na RX 580, i to je izmjereno, a ne pretpostavljeno: +0,10 dB na 1080p
+Quality je razlika koju tablica vidi, a oko teško, dok je −19 % FPS-a pri ×12
+razlika koju igrač osjeti. Tri stvari to mogu promijeniti i sve tri su izvan
+ovog hardvera: tenzorske/matrične jedinice (cijena mreže bila bi mali dio
+2,7 ms), veći model (c12-c24 je najbolji i najskuplji, trend nije zasićen) i
+bogatiji kandidati (mreža ovdje ne može bitno bolje od najboljeg kandidata po
+pikselu; na validacijskim patchevima izabranog modela taj je limit 50,8 dB
+naspram 47,3 dB heuristike i 48,0 dB mreže). To je, u malom, argument zašto FSR4 i DLSS traže hardver koji
+FSR3 ne traži.
+
+## Reprodukcija
+
+```
+scripts/ml_dataset.py                       # ~3 min, 2,9 GB u captures/ml/data/
+scripts/ml_sweep.sh                         # 2 gubitka x 3 sjemena, ~50 min CPU
+scripts/ml_select.py captures/ml/exp/*.bin  # izbor na validaciji, cijeli okviri
+cp captures/ml/exp/c8-c16-charbonnier-s1.bin captures/ml/weights/blend-c8-c16.bin
+scripts/ml_train.sh                         # ablacije veličine i podataka
+scripts/run_metrics.py --group fg-ml        # mjerni pogledi: heuristika i mreža
+scripts/run_metrics.py --group fg-ml-models # sjemena i ablacije
+build/fg_train gradcheck                    # provjera povratnog prolaza
+```
+
+Provjera shadera naspram trenera za bilo koji model:
+
+```
+build/fsr3lite --width 1920 --height 1080 --scale 1.5 --upscaler fsr --scripted --jitter \
+    --validate-fg --warmup 16 --fixed-dt 0.0333333 --frames 40 \
+    --scene assets/sponza/Sponza.gltf --scene-fit 12 --path-radius 4 --path-phase 1.3 \
+    --fg-ml captures/ml/weights/blend-c8-c16.bin --ml-dump /tmp/verify.bin
+build/fg_train eval --weights captures/ml/weights/blend-c8-c16.bin --data /tmp/verify.bin --margin 28
+```
+
+Učenje nije bit-deterministično: OpenMP zbraja gradijente dretvi redom kojim
+su uzorci raspoređeni, pa ponovljeno učenje istog sjemena daje model koji se
+razlikuje na zadnjim decimalama. Težine korištene u tablicama su u
+repozitoriju (`captures/ml/weights/`, `captures/ml/exp/`).

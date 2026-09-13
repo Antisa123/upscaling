@@ -187,6 +187,13 @@ Cilj: dokazati razumijevanje razlike između analitičkog (FSR3) i naučenog (DL
 - **Inferencija:** izvoz težina → ručno pisani compute shader (mali model je izvediv u GLSL-u), ili, ako ne stane u budžet, offline inferencija i usporedba samo po kvaliteti + procjena troška.
 - **Poglavlje analize:** zašto ML pristupi traže matrix/tensor jedinice, što FSR4 Redstone donosi i uz koje hardverske uvjete.
 
+**Odstupanja implementacije (M9, `docs/ML.md`):**
+- **Trening lokalno, vlastitim trenerom** (`tools/fg_train`, C++20 + OpenMP, CPU) umjesto PyTorcha na vanjskom GPU-u: projekt nema Python ovisnosti osim Pillowa, a model od nekoliko tisuća parametara uči se za ~8 min. Trener i shader provjeravaju se jedan naspram drugog na snimkama s izlazom shadera.
+- **Mreža ne predviđa masku dvaju warpova nego softmax težine nad sedam kandidata** (izlaz heuristike, četiri warpa, dva nepomaknuta okvira), inicijalizirane na heuristiku.
+- **Inferencija je u GLSL-u na punoj rezoluciji**, ne offline; raspored prolaza optimiran izmjereno (4,18 → 2,75 ms bez promjene funkcije).
+- **Skup: 18 putanja za učenje + 4 validacijske, podjela po putanji;** mjerni pogledi nikad nisu snimljeni. Izbor modela radi se na cijelim okvirima validacijskih putanja, jer validacija na patchevima nije otkrila grešku maske na rubu okvira (−4 dB).
+- Usput popravljen NaN u povijesti FSR upscalera (dijeljenje s w = 0 u `gbuffer.frag` na prvom okviru); standardna mjerenja bit-identična.
+
 ---
 
 ## 8. Modul F — Evaluacija
@@ -222,7 +229,7 @@ Cilj: dokazati razumijevanje razlike između analitičkog (FSR3) i naučenog (DL
 | M6 | Optical flow: piramida, search/filter/upscale, detekcija promjene scene | 3 tj | Debug vizualizacija toka (HSV) izgleda ispravno | ✅ gotovo (EPE 2,8 px pri 120 fps i 0,0 px na mirnoj kameri naspram 23,0 px bez procjene; 0,56 ms na 1080p — `docs/OPTICALFLOW.md`) |
 | M7 | Frame generation jezgra: passevi 1–7 | 3 tj | Interpolirani okvir postoji i mjerljiv je naspram ground trutha | ✅ gotovo (34,9 dB naspram 26,1 dB 50/50 blenda na 1080p Quality pri 60 fps; mirna kamera 40,14 dB = blend; 1,59 ms + 0,62 ms optical flow — `docs/FRAMEGEN.md`) |
 | M8 | Inpainting, UI kompozicija, frame pacing, latencija | 2 tj | FPS raste, frame time ravnomjeran, HUD čist | ✅ gotovo (uz opterećenje ×4–×24 prikazani FPS 1,36–1,58×, na neopterećenoj sceni bez dobitka; std intervala 0,5–1,1 ms naspram 3–10 ms bez pacinga; latencija +8–16 ms ≈ jedan render okvir; HUD 52,0 dB komponiran naspram 20,0 dB upečen; inpainting slike ±0,1 dB — `docs/PACING.md`) |
-| M9 | ML modul: dataset, trening, integracija, usporedba | 2 tj | Usporedna tablica heuristika vs. naučeni blend | — |
+| M9 | ML modul: dataset, trening, integracija, usporedba | 2 tj | Usporedna tablica heuristika vs. naučeni blend | ✅ gotovo (mreža 7 199 parametara u compute shaderima; SSIM viši na svih 8 mjernih pogleda, PSNR na 7 od 8, +0,03 do +0,20 dB, stabilno preko 3 sjemena; najgori okvir i neviđena scena bez dobitka; cijena +2,7 ms na 1080p, pri opterećenju ×12 147 → 120 fps — na RX 580 se ne isplati — `docs/ML.md`) |
 | M10 | Mjerenja, grafovi, pisanje rada | 3 tj | Sva poglavlja + reproducibilni rezultati | — |
 
 Ukupno ≈ 24 tjedna uz sekvencijalni rad. Kritični put je M1 → M4 → M7; M6 (optical flow) je neovisan i može teći paralelno ako radi dvoje.

@@ -45,6 +45,8 @@ motion vektore i retci koji mjere upscalere dijele istu tablicu.
 | `fg-ablation` | `--validate-fg --jitter` | jedan redak po mehanizmu generiranja; Sponza i proceduralna scena |
 | `fg-speed` | `--validate-fg --jitter` | isti generator kroz pet brzina kamere; pri 30 i 20 fps i redak „kao M7” (M8) |
 | `fg-hud` | `--validate-fg --jitter` | HUD komponiran nakon generiranja naspram upečenog prije njega, cijeli okvir i samo HUD pravokutnik (M8) |
+| `fg-ml` | `--validate-fg --jitter` | naučena mješavina naspram heuristike na istim pogledima: rezolucije, brzine, proceduralna scena (M9, `docs/ML.md`) |
+| `fg-ml-models` | `--validate-fg --jitter` | svi modeli iz `captures/ml/weights/` (sjemena, veličina mreže, skup samo Sponze) na Sponzi i proceduralnoj sceni (M9) |
 
 Dvije ablacijske grupe za M5 nisu redundantne: dilatacija i lockovi štite
 povijest, a 60 fps orbita je skrati na približno jedan okvir. Mjereno samo
@@ -229,6 +231,9 @@ ostaje poštena.
 | `scripts/fg_debug.py` | M7 figura: ulazni par, pravi međuokvir, interpolirani, blend, maske + karta pogreške |
 | `scripts/run_pacing.py` | M8: realtime mjerenja prikaza — FPS, raspodjela intervala, latencija, po opterećenju i načinu prikaza (`docs/PACING.md`) |
 | `scripts/make_font_atlas.py` | M8: rasterizira font HUD-a u `assets/ui_font.png` |
+| `scripts/ml_dataset.py` | M9: snima skup za učenje (patchevi značajki, kandidata i referentnog međuokvira), podjela po putanji kamere |
+| `scripts/ml_sweep.sh` / `scripts/ml_train.sh` | M9: učenje modela (gubitak × sjeme; ablacije veličine i podataka) vlastitim trenerom `tools/fg_train` |
+| `scripts/ml_select.py` | M9: izbor modela na cijelim okvirima validacijskih putanja |
 
 Sve pišu u `captures/`, sve su bez vanjskih ovisnosti osim Pillowa ondje gdje
 sastavljaju sliku.

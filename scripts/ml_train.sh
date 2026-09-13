@@ -6,7 +6,9 @@
 #   scripts/ml_train.sh            all models
 #   scripts/ml_train.sh NAME       one of them
 #
-#   blend-c8-c16          the reported model, all training paths
+#   blend-c8-c16          the reported model, all training paths (chosen from
+#                         the seeds of scripts/ml_sweep.sh by ml_select.py and
+#                         copied here; an existing file is never retrained)
 #   blend-c4-c8           half the width
 #   blend-c12-c24         one and a half times the width
 #   blend-c8-c16-sponza   Sponza paths only: the procedural scene becomes an
@@ -26,8 +28,9 @@ run() {
     local name=$1
     shift
     if [[ -n "$ONLY" && "$ONLY" != "$name" ]]; then return; fi
+    if [[ -f "$W/$name.bin" ]]; then echo "$name: exists, skipped"; return; fi
     build/fg_train train --out "$W/$name.bin" --log "$L/$name.csv" --steps 12000 --batch 16 \
-        --lr 0.002 --seed 1 "$@" 2>&1 | tee "$L/$name.txt"
+        --lr 0.002 --seed 1 --loss charbonnier "$@" 2>&1 | tee "$L/$name.txt"
 }
 
 run blend-c8-c16 --data "$ALL" --val "$VAL" --c0 8 --c1 16

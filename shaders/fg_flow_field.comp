@@ -41,6 +41,8 @@ uniform vec2 uDisplaySize;
 uniform float uErrorThreshold;
 // Displacement, in display pixels, that saturates the magnitude priority.
 uniform float uMagnitudeScale;
+// 0 drops the colour term, as in pass 3.
+uniform int uColorPriority;
 
 void main() {
     const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
@@ -61,9 +63,12 @@ void main() {
     const float magnitude = length(mv * uDisplaySize);
     const uint magBits = uint(clamp(1023.0 * magnitude / max(uMagnitudeScale, 1e-3), 0.0, 1023.0));
 
-    const float diff =
-        fgColorDistance(texture(uCurrent, uv).rgb, texture(uPrevious, uv + mv).rgb);
-    const uint colorBits = uint(clamp(31.0 * (1.0 - 4.0 * diff), 0.0, 31.0));
+    uint colorBits = 0u;
+    if (uColorPriority != 0) {
+        const float diff =
+            fgColorDistance(texture(uCurrent, uv).rgb, texture(uPrevious, uv + mv).rgb);
+        colorBits = uint(clamp(31.0 * (1.0 - 4.0 * diff), 0.0, 31.0));
+    }
 
     const uint priority = max((confident << 15) | (magBits << 5) | colorBits, 1u);
     imageAtomicMax(uFieldX, target, fgPack(priority, mv.x));

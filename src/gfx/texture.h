@@ -33,6 +33,26 @@ struct Texture2D {
     bool valid() const { return id != 0; }
 };
 
+// Immutable-storage 2D array texture, one mip level, linear filtering. The ML
+// blend network keeps its feature maps in these: a layer of N channels is
+// ceil(N / 4) RGBA16F layers, which is what lets a convolution run as mat4
+// products over vec4s.
+struct Texture2DArray {
+    GLuint id = 0;
+    int width = 0;
+    int height = 0;
+    int layers = 0;
+    GLenum format = GL_RGBA16F;
+
+    void ensure(int w, int h, int layerCount, GLenum internalFormat, const std::string& label);
+    void destroy();
+    void bindTexture(GLuint unit) const { glBindTextureUnit(unit, id); }
+    void bindImage(GLuint unit, GLenum access) const {
+        glBindImageTexture(unit, id, 0, GL_TRUE, 0, access, format);
+    }
+    bool valid() const { return id != 0; }
+};
+
 // Ping-pong pair: history-consuming passes read [1 - index] and write [index].
 struct PingPong {
     Texture2D tex[2];

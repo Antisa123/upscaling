@@ -1,0 +1,32 @@
+[gl] AMD Radeon RX 580 Series (radeonsi, polaris10, ACO, DRM 3.64, 7.1.13-hardened1-2-hardened) | 4.6 (Core Profile) Mesa 26.2.2-arch1.1 | GLSL 4.60
+[gltf] /home/matthew/Documents/Workspace/ante-galic/assets/sponza/Sponza.gltf: 103 meshes, 103 instances, 25 textures
+[app] keys: 1-9 debug views | 0 interpolated frame | J jitter | P scripted path | V vsync | F1-F5 scaling mode | SPACE pause | F12 screenshot | ESC quit
+[app]       G frame generation | Y pacing | H HUD | T tear lines | [ ] synthetic load
+[gpu] G-buffer                   0.746 ms (last   0.755)
+[gpu] Tonemap                    0.083 ms (last   0.082)
+[gpu] FSR dilate                 0.245 ms (last   0.248)
+[gpu] FSR locks                  0.059 ms (last   0.060)
+[gpu] FSR accumulate             0.678 ms (last   0.683)
+[gpu] Optical flow               0.558 ms (last   0.560)
+[gpu] OF pyramid                 0.108 ms (last   0.109)
+[gpu] OF scene change            0.039 ms (last   0.039)
+[gpu] OF flow                    0.408 ms (last   0.408)
+[gpu] OF level 6                 0.027 ms (last   0.027)
+[gpu] OF level 5                 0.018 ms (last   0.019)
+[gpu] OF level 4                 0.018 ms (last   0.018)
+[gpu] OF level 3                 0.018 ms (last   0.019)
+[gpu] OF level 2                 0.029 ms (last   0.029)
+[gpu] OF level 1                 0.070 ms (last   0.069)
+[gpu] OF level 0                 0.228 ms (last   0.228)
+[gpu] Frame generation           1.827 ms (last   1.794)
+[gpu] FG interpolate             0.539 ms (last   0.497)
+[gpu] Present                    0.254 ms (last   0.254)
+[gpu] FG setup                   0.094 ms (last   0.092)
+[gpu] FG depth                   0.083 ms (last   0.083)
+[gpu] FG game vector field       0.306 ms (last   0.309)
+[gpu] FG flow vector field       0.250 ms (last   0.255)
+[gpu] FG disocclusion masks      0.159 ms (last   0.162)
+[gpu] FG image inpaint           0.233 ms (last   0.233)
+[gpu] TOTAL                      4.450 ms (last   4.436)
+[present] 2420 presents (1210 real, 1210 generated)  interval mean 3.246 ms (308.1 fps)  std 0.625 ms  p99 5.422 ms
+[present] latency sample -> real frame 9.54 ms   sample -> generated frame 6.23 ms

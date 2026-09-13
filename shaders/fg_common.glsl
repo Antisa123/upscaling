@@ -26,8 +26,8 @@ uint fgPack(uint priority, float value) {
            (packHalf2x16(vec2(value, 0.0)) & 0xFFFFu);
 }
 
-float fgValue(uint packed) { return unpackHalf2x16(packed & 0xFFFFu).x; }
-uint fgPriority(uint packed) { return packed >> kFgPriorityShift; }
+float fgValue(uint word) { return unpackHalf2x16(word & 0xFFFFu).x; }
+uint fgPriority(uint word) { return word >> kFgPriorityShift; }
 
 // Fetch a resolved vector field, walking up the inpainting pyramid until a
 // level has an answer. Point sampling at every level on purpose: the field is

@@ -1,0 +1,66 @@
+#version 460 core
+
+// M9, pass 10: the network's input, and its first layer.
+//
+// Twenty features per display pixel (fg_ml_common.glsl). With ENC0_LAYERS
+// defined, the 1x1 layer enc0 runs right here on them and only its c0
+// channels are written: as a pass of its own it read back twenty channels at
+// display resolution that this pass had just written, which measured 0.6 ms at
+// 1080p for a layer that is nothing but a matrix product.
+//
+// WRITE_FEATURES and DUMP_CANDIDATES write the features and the seven
+// candidate colours themselves. Only the dataset capture reads them -- at run
+// time the blend pass gathers the candidates again, from the same function,
+// instead of paying for eleven more display-resolution layers.
+
+#include "fg_ml_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#ifdef WRITE_FEATURES
+layout(rgba16f, binding = 0) uniform writeonly image2DArray uFeatures;
+#endif
+#ifdef DUMP_CANDIDATES
+layout(rgba16f, binding = 1) uniform writeonly image2DArray uCandidates;
+#endif
+#ifdef ENC0_LAYERS
+layout(rgba16f, binding = 2) uniform writeonly image2DArray uEnc0;
+layout(std430, binding = 0) readonly buffer Weights {
+    mat4 w[ENC0_LAYERS * kMlFeatureLayers];
+    vec4 b[ENC0_LAYERS];
+};
+#endif
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uDisplaySize))) return;
+
+    const MlSample s = mlGather(pos);
+    vec4 f[kMlFeatureLayers];
+    mlFeatures(s, f);
+
+#ifdef WRITE_FEATURES
+    for (int l = 0; l < kMlFeatureLayers; ++l) imageStore(uFeatures, ivec3(pos, l), f[l]);
+#endif
+
+#ifdef ENC0_LAYERS
+    // The input normalisation is already folded into these weights.
+    for (int o = 0; o < ENC0_LAYERS; ++o) {
+        vec4 acc = b[o];
+        for (int i = 0; i < kMlFeatureLayers; ++i) acc += w[o * kMlFeatureLayers + i] * f[i];
+        imageStore(uEnc0, ivec3(pos, o), max(acc, vec4(0.0)));
+    }
+#endif
+
+#ifdef DUMP_CANDIDATES
+    float slots[24];
+    for (int k = 0; k < kMlCandidates; ++k)
+        for (int c = 0; c < 3; ++c) slots[k * 3 + c] = s.c[k][c];
+    slots[21] = 0.0;
+    slots[22] = 0.0;
+    slots[23] = 0.0;
+    for (int l = 0; l < 6; ++l)
+        imageStore(uCandidates, ivec3(pos, l),
+                   vec4(slots[4 * l], slots[4 * l + 1], slots[4 * l + 2], slots[4 * l + 3]));
+#endif
+}

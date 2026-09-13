@@ -1,4 +1,6 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <memory>
+#include <random>
 #include <stb_image_write.h>
 
 #include <SDL2/SDL.h>
@@ -21,6 +23,8 @@
 #include "metrics/image_metrics.h"
 #include "framegen/frame_generator.h"
 #include "opticalflow/optical_flow.h"
+#include "present/frame_pacer.h"
+#include "present/hud.h"
 #include "upscale/upscaler.h"
 #include "renderer/camera.h"
 #include "renderer/gbuffer.h"
@@ -152,13 +156,61 @@ struct Options {
     // 0 = the pyramid keeps the nearest surface, 1 = the background.
     int fgInpaintPick = 1;
     float fgDepth = 0.02f;
+    int fgColorPriority = 0;
+    float fgFlowBias = 0.5f;
     float fgAgreement = 24.f;
     float fgFlowError = 0.05f;
     float fgFlowMagnitude = 64.f;
     // Score the interpolated frame against a real render of the instant it
     // approximates, and against the 50/50 blend of its own two inputs.
     bool validateFg = false;
+    // M8, passes 8-9: image inpainting and the off-screen sample rejection.
+    int fgInpaint = 1;
+    int fgBounds = 1;
+    float fgInpaintCoverage = 0.3f;
+    int fgCoverageMasks = 1;
+    // M9. Learned blend weights (empty = heuristic), and the dataset capture:
+    // patches of the network's inputs and the reference frame, appended to a
+    // file for tools/fg_train. Capture needs --validate-fg for the reference.
+    std::string fgMl;
+    std::string mlDump;
+    int mlPatches = 8;
+    int mlPatchSize = 96;
+    unsigned mlSeed = 1;
+    // Scene time the run starts at, so a capture can cover a different
+    // stretch of the animation than the measurement window does.
+    double timeOffset = 0.0;
+
+    // M8. How generated frames reach the screen. "paced" holds the real frame
+    // back half a render period behind the generated one; "immediate" shows
+    // them back to back, which is what naive frame generation does.
+    std::string pacing = "paced";
+    // 0 runs frame generation (and pays for it) but presents real frames only.
+    int presentFg = 1;
+    // One row per presented image: when its frame was sampled, handed over,
+    // and put on screen. See scripts/run_pacing.py.
+    std::string presentCsv;
+    // Realtime run length, wall clock. The counterpart of --frames for runs
+    // whose point is timing rather than bit-identical images.
+    double runSeconds = 0.0;
+    // Extra G-buffer renders per frame: a stand-in for a heavier game, so the
+    // render cost frame generation has to beat can be dialled in.
+    int load = 0;
+    // none | composite | baked. Empty = composite interactively, none in a
+    // measurement run (the HUD is not free, and it is not part of any earlier
+    // result table).
+    std::string ui;
+    bool tearLines = false;
+    // Sync the render thread's GPU work after every stage: 1 = glFlush,
+    // 2 = glFinish. Off by default -- the presenter stages its frames on an
+    // idle GPU instead (frame_pacer.h), and both of these were measured as
+    // the alternatives: a flush does not help, and a finish paces well but
+    // costs 30% of the frame rate in GPU idle time. See docs/PACING.md.
+    int gpuFlush = 0;
+
 };
+
+enum class UiMode { None, Composite, Baked };
 
 const char* kScaleNames[] = {"Native", "NativeAA 1.0x", "Quality 1.5x", "Balanced 1.7x",
                              "Performance 2.0x", "Ultra Performance 3.0x"};
@@ -270,6 +322,10 @@ int main(int argc, char** argv) {
         else if (arg == "--fg-inpaint-pick" && i + 1 < argc)
             options.fgInpaintPick = std::atoi(argv[++i]);
         else if (arg == "--fg-depth" && i + 1 < argc) options.fgDepth = std::atof(argv[++i]);
+        else if (arg == "--fg-flow-bias" && i + 1 < argc)
+            options.fgFlowBias = std::atof(argv[++i]);
+        else if (arg == "--fg-color-priority" && i + 1 < argc)
+            options.fgColorPriority = std::atoi(argv[++i]);
         else if (arg == "--fg-agreement" && i + 1 < argc)
             options.fgAgreement = std::atof(argv[++i]);
         else if (arg == "--fg-flow-error" && i + 1 < argc)
@@ -280,6 +336,26 @@ int main(int argc, char** argv) {
             options.validateFg = true;
             options.frameGen = true;
         }
+        else if (arg == "--fg-inpaint" && i + 1 < argc) options.fgInpaint = std::atoi(argv[++i]);
+        else if (arg == "--fg-bounds" && i + 1 < argc) options.fgBounds = std::atoi(argv[++i]);
+        else if (arg == "--fg-inpaint-coverage" && i + 1 < argc)
+            options.fgInpaintCoverage = std::atof(argv[++i]);
+        else if (arg == "--fg-coverage-masks" && i + 1 < argc)
+            options.fgCoverageMasks = std::atoi(argv[++i]);
+        else if (arg == "--pacing" && i + 1 < argc) options.pacing = argv[++i];
+        else if (arg == "--present-fg" && i + 1 < argc) options.presentFg = std::atoi(argv[++i]);
+        else if (arg == "--present-csv" && i + 1 < argc) options.presentCsv = argv[++i];
+        else if (arg == "--run-seconds" && i + 1 < argc) options.runSeconds = std::atof(argv[++i]);
+        else if (arg == "--load" && i + 1 < argc) options.load = std::atoi(argv[++i]);
+        else if (arg == "--ui" && i + 1 < argc) options.ui = argv[++i];
+        else if (arg == "--tear-lines") options.tearLines = true;
+        else if (arg == "--gpu-flush" && i + 1 < argc) options.gpuFlush = std::atoi(argv[++i]);
+        else if (arg == "--fg-ml" && i + 1 < argc) options.fgMl = argv[++i];
+        else if (arg == "--ml-dump" && i + 1 < argc) options.mlDump = argv[++i];
+        else if (arg == "--ml-patches" && i + 1 < argc) options.mlPatches = std::atoi(argv[++i]);
+        else if (arg == "--ml-patch-size" && i + 1 < argc) options.mlPatchSize = std::atoi(argv[++i]);
+        else if (arg == "--ml-seed" && i + 1 < argc) options.mlSeed = static_cast<unsigned>(std::atoll(argv[++i]));
+        else if (arg == "--time-offset" && i + 1 < argc) options.timeOffset = std::atof(argv[++i]);
         else if (arg == "--filter-pattern") options.filterPattern = 1;
         else if (arg == "--no-filter-pattern") options.filterPattern = 0;
         else {
@@ -300,9 +376,39 @@ int main(int argc, char** argv) {
                              "(try --upscaler fsr --scale 1.5)\n");
         return 1;
     }
+    std::unique_ptr<std::FILE, int (*)(std::FILE*)> mlDumpFile(nullptr, std::fclose);
+    if (!options.mlDump.empty()) {
+        if (!options.validateFg || !options.frameGen) {
+            std::fprintf(stderr, "--ml-dump needs --validate-fg: the reference frame is the label\n");
+            return 1;
+        }
+        // The header goes in with the first patches, once the frame size is known.
+        mlDumpFile.reset(std::fopen(options.mlDump.c_str(), "wb"));
+        if (!mlDumpFile) {
+            std::fprintf(stderr, "cannot write %s\n", options.mlDump.c_str());
+            return 1;
+        }
+    }
+    std::mt19937 mlRng(options.mlSeed);
+
     if (options.validateFg && !options.scripted) {
         std::fprintf(stderr, "[app] --validate-fg needs --scripted: the reference frame is "
                              "rendered at t-dt/2 along the scripted path\n");
+        return 1;
+    }
+
+    const bool measurementRun = options.frameLimit > 0 || options.runSeconds > 0.0;
+    UiMode uiMode = measurementRun ? UiMode::None : UiMode::Composite;
+    if (options.ui == "none") uiMode = UiMode::None;
+    else if (options.ui == "composite") uiMode = UiMode::Composite;
+    else if (options.ui == "baked") uiMode = UiMode::Baked;
+    else if (!options.ui.empty()) {
+        std::fprintf(stderr, "[app] unknown --ui '%s' (none|composite|baked)\n", options.ui.c_str());
+        return 1;
+    }
+    if (options.pacing != "paced" && options.pacing != "immediate") {
+        std::fprintf(stderr, "[app] unknown --pacing '%s' (paced|immediate)\n",
+                     options.pacing.c_str());
         return 1;
     }
 
@@ -326,12 +432,26 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // M8: two contexts sharing objects. The render context never touches the
+    // window: it lives on a hidden 1x1 surface, because a context has to be
+    // current on *some* surface on this driver stack (a surfaceless
+    // MakeCurrent reports success and leaves nothing current). The present
+    // context owns the window and belongs to the presenter thread; see
+    // present/frame_pacer.h for why presentation has a thread of its own.
     SDL_GLContext context = SDL_GL_CreateContext(window);
     if (!context) {
         std::fprintf(stderr, "[app] GL 4.6 core context unavailable: %s\n", SDL_GetError());
         return 1;
     }
-    SDL_GL_SetSwapInterval(options.vsync ? 1 : 0);
+    SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+    SDL_GLContext presentContext = SDL_GL_CreateContext(window);
+    SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
+    SDL_Window* renderWindow = SDL_CreateWindow("fsr3lite render", 0, 0, 1, 1,
+                                                SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+    if (!presentContext || !renderWindow || SDL_GL_MakeCurrent(renderWindow, context) != 0) {
+        std::fprintf(stderr, "[app] shared present context unavailable: %s\n", SDL_GetError());
+        return 1;
+    }
 
     std::printf("[gl] %s | %s | GLSL %s\n", glGetString(GL_RENDERER), glGetString(GL_VERSION),
                 glGetString(GL_SHADING_LANGUAGE_VERSION));
@@ -400,6 +520,41 @@ int main(int argc, char** argv) {
     presentTex.ensure(displayWidth, displayHeight, GL_RGBA8, 1, "present.color");
     presentFbo.attachColor(0, presentTex);
     presentFbo.finalizeAttachments();
+
+    // Compose passes: frame + HUD layer + tear lines into a presenter slot
+    // (RGBA8), or into a display-referred RGBA16F image for the baked HUD and
+    // the validation references.
+    gfx::Program composeProgram = gfx::Program::compute("ui_compose.comp");
+    gfx::Program composeHdrProgram = gfx::Program::compute("ui_compose_hdr.comp");
+    present::Hud hud;
+    if (!composeProgram.valid() || !composeHdrProgram.valid() || !hud.create()) {
+        std::fprintf(stderr, "[app] HUD / compose setup failed\n");
+        return 1;
+    }
+    bool hudVisible = true;
+    bool tearLines = options.tearLines;
+
+    present::FramePacer pacer;
+    if (!pacer.start(window, presentContext, displayWidth, displayHeight, options.vsync)) return 1;
+    pacer.setPacing(options.pacing == "immediate" ? present::PacingMode::Immediate
+                                                  : present::PacingMode::Paced);
+    const double runStartMs = present::FramePacer::nowMs();
+    std::ofstream presentCsv;
+    if (!options.presentCsv.empty()) {
+        presentCsv.open(options.presentCsv);
+        presentCsv << "frame,interpolated,sample_ms,ready_ms,present_ms,gpu_wait_ms,caught_up\n";
+        presentCsv << std::fixed << std::setprecision(4);
+    }
+    std::vector<present::PresentRecord> presentHistory;
+    auto drainPresents = [&] {
+        for (const present::PresentRecord& r : pacer.takeRecords()) {
+            if (presentCsv.is_open())
+                presentCsv << r.frame << ',' << r.interpolated << ',' << r.sampleMs - runStartMs
+                           << ',' << r.readyMs - runStartMs << ',' << r.presentMs - runStartMs
+                           << ',' << r.gpuWaitMs << ',' << r.caughtUp << '\n';
+            if (measurementRun && r.frame >= options.warmupFrames) presentHistory.push_back(r);
+        }
+    };
 
     renderer::Camera camera;
     camera.setPerspective(glm::radians(60.f), 0.05f);
@@ -507,9 +662,17 @@ int main(int argc, char** argv) {
         fgOptions.levels = options.fgLevels;
         fgOptions.inpaintPick = options.fgInpaintPick;
         fgOptions.agreement = options.fgAgreement;
+        fgOptions.colorPriority = options.fgColorPriority != 0;
+        fgOptions.flowBias = options.fgFlowBias;
         fgOptions.flowErrorThreshold = options.fgFlowError;
         fgOptions.flowMagnitudeScale = options.fgFlowMagnitude;
         fgOptions.measureBlend = options.validateFg;
+        fgOptions.imageInpaint = options.fgInpaint != 0;
+        fgOptions.boundsCheck = options.fgBounds != 0;
+        fgOptions.inpaintMinCoverage = options.fgInpaintCoverage;
+        fgOptions.coverageMasks = options.fgCoverageMasks != 0;
+        fgOptions.mlWeights = options.fgMl;
+        fgOptions.mlDump = !options.mlDump.empty();
         frameGen.setOptions(fgOptions);
         frameGen.create();
     }
@@ -567,6 +730,26 @@ int main(int argc, char** argv) {
     gfx::Texture2D gtLinear;   // display resolution reference, linear HDR
     gfx::Texture2D gtLdr;      // ... and the same reference, display-referred
     gfx::Texture2D gtMidLdr;   // the real frame at t-dt/2, display-referred
+    // M8. The upscaled frame with the HUD baked in (--ui baked), and the
+    // HUD-composed images the validation compares when a HUD is on screen.
+    gfx::Texture2D bakedFrame;
+    gfx::Texture2D gtMidUi, fgUi, blendUi;
+    gfx::Texture2D hudCandidate, hudReference, hudBlend;
+    // Synthetic load: a second render-resolution G-buffer, so the extra
+    // renders never touch the real one's history.
+    renderer::GBuffer loadBuffer;
+    bool loadCreated = false;
+    int loadCount = std::max(options.load, 0);
+    auto ensureLoadBuffer = [&] {
+        if (loadCount <= 0) return;
+        if (!loadCreated) {
+            loadBuffer.create(renderWidth, renderHeight);
+            loadCreated = true;
+        } else {
+            loadBuffer.resize(renderWidth, renderHeight);
+        }
+    };
+    ensureLoadBuffer();
     // Last frame's upscaled output and last frame's reference, kept only so the
     // temporal stability metric has something to reproject. See the block that
     // fills them for what the number means.
@@ -627,6 +810,47 @@ int main(int argc, char** argv) {
         glDrawArrays(GL_TRIANGLES, 0, 3);
     };
 
+    // Source -> target, with the HUD layer over it and optionally the tear-line
+    // strip. The program picks the target format.
+    auto compose = [&](gfx::Program& program, const gfx::Texture2D& source,
+                       const gfx::Texture2D& target, bool ui, int tearIndex, bool interpolated) {
+        program.bind();
+        source.bindTexture(0);
+        program.set("uSource", 0);
+        if (hud.layer().valid()) hud.layer().bindTexture(1);
+        program.set("uLayer", 1);
+        target.bindImage(0, GL_WRITE_ONLY);
+        program.set("uDisplaySize", displayWidth, displayHeight);
+        program.set("uUi", ui && hud.layer().valid() ? 1 : 0);
+        program.set("uTearIndex", tearIndex);
+        program.set("uInterpolated", interpolated ? 1 : 0);
+        program.dispatch(displayWidth, displayHeight);
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+    };
+    // Crops the HUD panel out of a display-resolution RGBA16F image.
+    auto cropHud = [&](const gfx::Texture2D& source, gfx::Texture2D& crop, const char* label) {
+        crop.ensure(hud.width(), hud.height(), GL_RGBA16F, 1, label);
+        glCopyImageSubData(source.id, GL_TEXTURE_2D, 0, hud.rectX(), hud.rectY(), 0, crop.id,
+                           GL_TEXTURE_2D, 0, 0, 0, 0, hud.width(), hud.height(), 1);
+    };
+    auto writeTexture = [&](const gfx::Texture2D& tex, const std::string& path) {
+        GLuint fbo = 0;
+        glCreateFramebuffers(1, &fbo);
+        glNamedFramebufferTexture(fbo, GL_COLOR_ATTACHMENT0, tex.id, 0);
+        writeImage(fbo, tex.width, tex.height, path);
+        glDeleteFramebuffers(1, &fbo);
+    };
+
+    // A flush only hands the work to the kernel, which queues GPU jobs in
+    // submission order: the render thread submits a whole frame in about a
+    // millisecond and a blit from the presenter still waits behind all of it.
+    // Finishing each stage keeps the render thread at most one stage ahead of
+    // the GPU -- what a fence would do, which this driver does not have.
+    auto stageFlush = [&] {
+        if (options.gpuFlush == 1) glFlush();
+        else if (options.gpuFlush >= 2) glFinish();
+    };
+
     gfx::GpuTimer timer;
     // Per-frame CSV so a results table for the thesis is one command away
     // instead of a manual transcription of console output.
@@ -648,6 +872,8 @@ int main(int argc, char** argv) {
             csv << ",epe_px,epe_within1,epe_within2,scene_change,sc_max,sc_mean,sc_median,cut";
         if (options.validateFg)
             csv << ",psnr_fg,ssim_fg,psnr_blend,ssim_blend";
+        if (options.validateFg && uiMode != UiMode::None)
+            csv << ",psnr_hud,ssim_hud,psnr_hud_blend,ssim_hud_blend";
         csv << '\n';
         csv << std::fixed << std::setprecision(6);
     }
@@ -671,6 +897,8 @@ int main(int argc, char** argv) {
     double fgPsnrSum = 0.0, fgSsimSum = 0.0, fgBlendPsnrSum = 0.0, fgBlendSsimSum = 0.0;
     double fgWorstPsnr = 1e9;
     int fgSamples = 0;
+    metrics::CompareResult lastHud, lastHudBlend;
+    double hudPsnrSum = 0.0, hudSsimSum = 0.0, hudBlendPsnrSum = 0.0, hudBlendSsimSum = 0.0;
     opticalflow::Accuracy lastFlow;
     double flowEpeSum = 0.0, flowWithin1Sum = 0.0, flowWithin2Sum = 0.0;
     double flowWorstEpe = 0.0;
@@ -683,16 +911,24 @@ int main(int argc, char** argv) {
     long long frameCounter = 0;
     bool cutHistory[3] = {false, false, false};
     bool paused = false;
-    double sceneTime = 0.0;
+    double sceneTime = options.timeOffset;
     Uint64 previousCounter = SDL_GetPerformanceCounter();
     double statTimer = 0.0;
     double reloadTimer = 0.0;
     int framesSinceStat = 0;
     double cpuMsAccum = 0.0;
+    // Runtime switch for frame generation. Turning it back on restarts the
+    // module's history, which by then is a stale frame.
+    bool fgActive = options.frameGen;
+    bool fgResume = false;
+    long long presentedCounter = 0;
+    int shotCounter = 0;
+    bool shotRequested = false;
 
     std::printf(
-        "[app] keys: 1-5 debug views | J jitter | P scripted path | V vsync | "
-        "F1-F5 scaling mode | SPACE pause | F12 screenshot | ESC quit\n");
+        "[app] keys: 1-9 debug views | 0 interpolated frame | J jitter | P scripted path | V vsync | "
+        "F1-F5 scaling mode | SPACE pause | F12 screenshot | ESC quit\n"
+        "[app]       G frame generation | Y pacing | H HUD | T tear lines | [ ] synthetic load\n");
 
     while (running) {
         const Uint64 nowCounter = SDL_GetPerformanceCounter();
@@ -705,9 +941,20 @@ int main(int argc, char** argv) {
         if (options.fixedDeltaTime > 0.0) dt = options.fixedDeltaTime;
 
         SDL_Event event;
+        // A measurement run (--frames) takes no input. The window still gets
+        // focus like any other, and a stray key reaching it is not harmless: a
+        // space bar pauses scene time, and every frame after that measures a
+        // frozen camera under a configuration name that says otherwise. That
+        // happened once, silently, in an ablation row; this is why.
+        const bool acceptInput = !measurementRun;
+        const bool lastFrame =
+            (options.frameLimit > 0 && frameCounter + 1 >= options.frameLimit) ||
+            (options.runSeconds > 0.0 &&
+             present::FramePacer::nowMs() - runStartMs >= options.runSeconds * 1000.0);
         while (SDL_PollEvent(&event)) {
-            camera.handleEvent(event);
             if (event.type == SDL_QUIT) running = false;
+            if (!acceptInput) continue;
+            camera.handleEvent(event);
             if (event.type == SDL_WINDOWEVENT &&
                 (event.window.event == SDL_WINDOWEVENT_RESIZED ||
                  event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)) {
@@ -726,6 +973,9 @@ int main(int argc, char** argv) {
                     case SDLK_7: debugMode = 6; break;
                     case SDLK_8: debugMode = 7; break;
                     case SDLK_9: debugMode = 8; break;
+                    // M7 views: the interpolated frame itself, and what the
+                    // module thought while making it.
+                    case SDLK_0: debugMode = debugMode == 9 ? 10 : 9; break;
                     case SDLK_f:
                         gbuffer.setPatternFilter(!gbuffer.patternFilter());
                         std::printf("[app] pattern filter %s\n", gbuffer.patternFilter() ? "on" : "off");
@@ -741,7 +991,30 @@ int main(int argc, char** argv) {
                         break;
                     case SDLK_v:
                         options.vsync = !options.vsync;
-                        SDL_GL_SetSwapInterval(options.vsync ? 1 : 0);
+                        pacer.setVsync(options.vsync);
+                        break;
+                    case SDLK_g:
+                        if (options.frameGen) {
+                            fgActive = !fgActive;
+                            fgResume = fgActive;
+                            std::printf("[app] frame generation %s\n", fgActive ? "on" : "off");
+                        }
+                        break;
+                    case SDLK_y:
+                        pacer.setPacing(pacer.pacing() == present::PacingMode::Paced
+                                            ? present::PacingMode::Immediate
+                                            : present::PacingMode::Paced);
+                        break;
+                    case SDLK_h: hudVisible = !hudVisible; break;
+                    case SDLK_t: tearLines = !tearLines; break;
+                    case SDLK_LEFTBRACKET:
+                        loadCount = std::max(loadCount - 1, 0);
+                        std::printf("[app] synthetic load x%d\n", loadCount);
+                        break;
+                    case SDLK_RIGHTBRACKET:
+                        ++loadCount;
+                        ensureLoadBuffer();
+                        std::printf("[app] synthetic load x%d\n", loadCount);
                         break;
                     case SDLK_SPACE: paused = !paused; break;
                     case SDLK_F1: case SDLK_F2: case SDLK_F3: case SDLK_F4: case SDLK_F5: {
@@ -750,6 +1023,7 @@ int main(int argc, char** argv) {
                         refreshScaleLabel();
                         renderSize(renderWidth, renderHeight);
                         gbuffer.resize(renderWidth, renderHeight);
+                        if (loadCreated) loadBuffer.resize(renderWidth, renderHeight);
                         applyMipBias();
                         camera.setResolution(renderWidth, renderHeight, displayWidth, displayHeight);
                         camera.requestJumpCut();
@@ -757,12 +1031,7 @@ int main(int argc, char** argv) {
                                     renderHeight);
                         break;
                     }
-                    case SDLK_F12: {
-                        static int shotCounter = 0;
-                        writeImage(presentFbo.id, displayWidth, displayHeight,
-                                   "captures/shot_" + std::to_string(shotCounter++) + ".png");
-                        break;
-                    }
+                    case SDLK_F12: shotRequested = true; break;
                     default: break;
                 }
             }
@@ -779,6 +1048,9 @@ int main(int argc, char** argv) {
             upscaler.reloadShaders();
             if (options.opticalFlow) flow.reloadShaders();
             if (options.frameGen) frameGen.reloadShaders();
+            hud.reloadShaders();
+            composeProgram.reloadIfChanged();
+            composeHdrProgram.reloadIfChanged();
         }
 
         const Uint64 cpuStart = SDL_GetPerformanceCounter();
@@ -813,9 +1085,70 @@ int main(int argc, char** argv) {
         else
             camera.update(static_cast<float>(dt), SDL_GetKeyboardState(nullptr));
         scene.update(sceneTime);
+        // Latency is measured from here: the moment this frame's input and
+        // simulation state are fixed. What the display and the compositor add
+        // after the swap is not visible to the application and is not in it.
+        const double sampleMs = present::FramePacer::nowMs();
 
         timer.beginFrame();
         gbuffer.render(scene, camera, timer);
+        stageFlush();
+        if (loadCount > 0 && loadCreated) {
+            gfx::GpuScope scope(timer, "Synthetic load");
+            for (int i = 0; i < loadCount; ++i) {
+                loadBuffer.render(scene, camera, timer, false, "load G-buffer");
+                stageFlush();
+            }
+        }
+
+        // M8: the HUD. Rendered before anything reads it, because in the baked
+        // mode frame generation does. In a validation run it is static -- a
+        // counter that changes between the two frames would be a legitimate
+        // difference the interpolation is then scored against.
+        const bool uiOn = uiMode != UiMode::None && hudVisible;
+        if (uiOn) {
+            if (options.validateFg) {
+                if (frameCounter == 0) {
+                    hud.setLines({"fsr3lite M8 | HUD validation (static)",
+                                  "FG on | pacing paced | vsync off | ui fixed",
+                                  "presented  120.0 fps   rendered   60.0 fps",
+                                  "frame  16.67 ms   GPU   4.20 ms   load x0",
+                                  "latency  21.3 ms  sample -> real present",
+                                  "graph: present intervals, line = target",
+                                  "H hud  T tear lines  G frame gen  Y pacing"});
+                    std::vector<float> graph(present::Hud::kGraphSamples);
+                    for (size_t i = 0; i < graph.size(); ++i)
+                        graph[i] = 8.333f + 3.0f * std::sin(0.37f * static_cast<float>(i)) +
+                                   (i % 37 == 0 ? 12.0f : 0.0f);
+                    hud.setGraph(graph, 8.333f);
+                }
+            } else {
+                const bool showingFg = fgActive && options.presentFg != 0 && useUpscaler;
+                const double renderFps = pacer.renderFps();
+                const double frameMs = renderFps > 0.0 ? 1000.0 / renderFps : 0.0;
+                char lines[present::Hud::kRows][96];
+                std::snprintf(lines[0], 96, "fsr3lite | %s %dx%d -> %dx%d", scaleLabel, renderWidth,
+                              renderHeight, displayWidth, displayHeight);
+                std::snprintf(lines[1], 96, "FG %s | pacing %s | vsync %s | ui %s",
+                              !options.frameGen ? "n/a" : showingFg ? "on" : "off",
+                              pacer.pacing() == present::PacingMode::Paced ? "paced" : "immediate",
+                              options.vsync ? "on" : "off",
+                              uiMode == UiMode::Baked ? "baked" : "composite");
+                std::snprintf(lines[2], 96, "presented %6.1f fps   rendered %6.1f fps",
+                              pacer.presentedFps(), renderFps);
+                std::snprintf(lines[3], 96, "frame %6.2f ms   GPU %6.2f ms   load x%d", frameMs,
+                              timer.totalMs(), loadCount);
+                std::snprintf(lines[4], 96, "latency %5.1f ms  sample -> real present",
+                              pacer.latencyMs());
+                std::snprintf(lines[5], 96, "graph: present intervals, line = target");
+                std::snprintf(lines[6], 96, "H hud  T tear lines  G frame gen  Y pacing");
+                hud.setLines(std::vector<std::string>(lines, lines + present::Hud::kRows));
+                static std::vector<float> intervals;
+                pacer.recentIntervals(intervals);
+                hud.setGraph(intervals, static_cast<float>(showingFg ? 0.5 * frameMs : frameMs));
+            }
+            hud.render(displayWidth, displayHeight, timer);
+        }
 
         // Motion vector validation: reprojecting the previous frame by the
         // velocity buffer must match the current frame far better than simply
@@ -853,22 +1186,39 @@ int main(int argc, char** argv) {
             temporal.jitterY = camera.jitter().y;
             temporal.reset = cameraCut;
             upscaler.dispatch(ldrInput, displayWidth, displayHeight, upscaleMode, timer, temporal);
+            stageFlush();
+            // The baked HUD goes into a copy: the upscaler's history must stay
+            // clean, exactly as a game that draws its UI after upscaling keeps
+            // it -- the question here is only what frame generation sees.
+            if (uiMode == UiMode::Baked) {
+                gfx::GpuScope scope(timer, "HUD bake");
+                bakedFrame.ensure(displayWidth, displayHeight, GL_RGBA16F, 1, "ui.baked");
+                compose(composeHdrProgram, upscaler.output(), bakedFrame, uiOn, -1, false);
+            }
         } else if (options.opticalFlow) {
             // No upscaler, but the flow still needs a display-referred image.
             upscaler.tonemap(gbuffer.color(), ldrInput, timer, "Tonemap");
         }
 
-        if (options.opticalFlow) {
-            const gfx::Texture2D& flowInput = useUpscaler ? upscaler.output() : ldrInput;
-            flow.dispatch(flowInput, timer, cameraCut);
+        // What reaches the screen as the real frame, and what frame generation
+        // interpolates between.
+        const gfx::Texture2D& finalFrame =
+            uiMode == UiMode::Baked && useUpscaler ? bakedFrame : upscaler.output();
+        const bool fgReset = cameraCut || fgResume;
+        fgResume = false;
+
+        if (options.opticalFlow && (fgActive || !options.frameGen)) {
+            const gfx::Texture2D& flowInput = useUpscaler ? finalFrame : ldrInput;
+            flow.dispatch(flowInput, timer, fgReset);
+            stageFlush();
         }
 
         // M7: the frame between this one and the last one. It is produced every
         // frame here, measured, and then thrown away -- putting it on the
         // screen at the right moment is frame pacing, which is M8.
-        if (options.frameGen) {
+        if (options.frameGen && fgActive) {
             framegen::Inputs fgInputs;
-            fgInputs.current = &upscaler.output();
+            fgInputs.current = &finalFrame;
             // The dilated buffer only exists for the M5 modes. Without it the
             // scatter falls back to the raw velocity buffer, which is the
             // ablation that shows what dilation is worth on a silhouette.
@@ -879,8 +1229,9 @@ int main(int argc, char** argv) {
             fgInputs.renderWidth = renderWidth;
             fgInputs.renderHeight = renderHeight;
             fgInputs.flow = flow.valid() ? &flow.flow() : nullptr;
-            fgInputs.reset = cameraCut;
+            fgInputs.reset = fgReset;
             frameGen.dispatch(fgInputs, timer);
+            stageFlush();
         }
 
         // Score the interpolated frame against the frame that instant really
@@ -900,7 +1251,8 @@ int main(int argc, char** argv) {
         // module says so by falling back to a copy, and scoring that copy
         // against a frame from a different part of the scene measures the
         // scene, not the module.
-        if (options.validateFg && frameCounter >= kGtWarmup && !cameraCut && frameGen.valid()) {
+        if (options.validateFg && frameCounter >= kGtWarmup && !cameraCut && fgActive &&
+            frameGen.valid()) {
             const double midTime = sceneTime - 0.5 * dt;
             renderer::Camera midCamera = camera;
             midCamera.applyScriptedPath(midTime);
@@ -911,18 +1263,57 @@ int main(int argc, char** argv) {
             scene.update(sceneTime, false);
             glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
 
-            lastFg = imageMetrics.compare(frameGen.output(), gtMidLdr,
+            // With a HUD on screen the reference is the real midpoint frame
+            // with the HUD composed over it: that is what a correct pipeline
+            // shows. Composite mode puts the same HUD over the interpolated
+            // frame; baked mode has it inside already, warped.
+            const gfx::Texture2D* candidate = &frameGen.output();
+            const gfx::Texture2D* blendCandidate = &frameGen.blend();
+            const gfx::Texture2D* reference = &gtMidLdr;
+            if (uiOn) {
+                gfx::GpuScope scope(timer, "ref: HUD compose");
+                gtMidUi.ensure(displayWidth, displayHeight, GL_RGBA16F, 1, "ui.gtMid");
+                compose(composeHdrProgram, gtMidLdr, gtMidUi, true, -1, false);
+                reference = &gtMidUi;
+                if (uiMode == UiMode::Composite) {
+                    fgUi.ensure(displayWidth, displayHeight, GL_RGBA16F, 1, "ui.fg");
+                    blendUi.ensure(displayWidth, displayHeight, GL_RGBA16F, 1, "ui.blend");
+                    compose(composeHdrProgram, frameGen.output(), fgUi, true, -1, false);
+                    compose(composeHdrProgram, frameGen.blend(), blendUi, true, -1, false);
+                    candidate = &fgUi;
+                    blendCandidate = &blendUi;
+                }
+            }
+            lastFg = imageMetrics.compare(*candidate, *reference,
                                           metrics::ImageMetrics::Mode::Direct, nullptr,
                                           /*tonemap=*/false);
-            lastFgBlend = imageMetrics.compare(frameGen.blend(), gtMidLdr,
+            lastFgBlend = imageMetrics.compare(*blendCandidate, *reference,
                                                metrics::ImageMetrics::Mode::Direct, nullptr,
                                                /*tonemap=*/false);
+            if (uiOn) {
+                cropHud(*candidate, hudCandidate, "ui.hudCandidate");
+                cropHud(*blendCandidate, hudBlend, "ui.hudBlend");
+                cropHud(*reference, hudReference, "ui.hudReference");
+                lastHud = imageMetrics.compare(hudCandidate, hudReference,
+                                               metrics::ImageMetrics::Mode::Direct, nullptr, false);
+                lastHudBlend = imageMetrics.compare(hudBlend, hudReference,
+                                                    metrics::ImageMetrics::Mode::Direct, nullptr,
+                                                    false);
+                hudPsnrSum += lastHud.psnr;
+                hudSsimSum += lastHud.ssim;
+                hudBlendPsnrSum += lastHudBlend.psnr;
+                hudBlendSsimSum += lastHudBlend.ssim;
+            }
             fgPsnrSum += lastFg.psnr;
             fgSsimSum += lastFg.ssim;
             fgBlendPsnrSum += lastFgBlend.psnr;
             fgBlendSsimSum += lastFgBlend.ssim;
             fgWorstPsnr = std::min(fgWorstPsnr, lastFg.psnr);
             ++fgSamples;
+            if (mlDumpFile && uiMode == UiMode::None && frameCounter >= options.warmupFrames)
+                frameGen.ml().dumpPatches(mlDumpFile.get(), frameCounter, frameGen.heuristicOutput(),
+                                          gtMidLdr, options.mlPatchSize, options.mlPatches, mlRng,
+                                          !options.fgMl.empty());
         }
 
         // Score the upscaled frame against the same instant rendered natively
@@ -1043,27 +1434,56 @@ int main(int argc, char** argv) {
                        << displayWidth << 'x' << displayHeight << '\n';
         }
 
+        // M8: hand the frame to the presenter. Blocks while every slot is still
+        // in flight -- the presenter is behind, and rendering further ahead
+        // would only add latency.
+        const int slotIndex = pacer.acquire();
+        present::Slot& slot = pacer.slot(slotIndex);
+        // The generated frame is shown only on the plain view, and not on a
+        // reset, where the module hands back a copy of the current frame: that
+        // would be the same image twice, counted as two frames.
+        const bool showInterpolated = options.frameGen && fgActive && options.presentFg != 0 &&
+                                      useUpscaler && debugMode == 0 && frameGen.valid() &&
+                                      !fgReset;
         {
             gfx::GpuScope scope(timer, "Present");
             // Debug views still need the G-buffer; only the plain colour view
             // can be replaced by the upscaled image.
+            const gfx::Texture2D* source = &presentTex;
             if (options.frameGen && debugMode == 9 && frameGen.valid())
-                presentTexture(frameGen.output(), 0);
+                source = &frameGen.output();
             else if (options.frameGen && debugMode == 10 && frameGen.valid())
-                presentTexture(frameGen.debug(), 0);
+                source = &frameGen.debug();
             else if (useUpscaler && debugMode == 0)
-                presentTexture(upscaler.output(), 0);
+                source = &finalFrame;
             else
                 presentTo(gbuffer, renderWidth, renderHeight);
 
-            // Scale the display-resolution image into whatever window the
-            // compositor gave us.
-            int windowWidth = 0, windowHeight = 0;
-            SDL_GL_GetDrawableSize(window, &windowWidth, &windowHeight);
-            glBlitNamedFramebuffer(presentFbo.id, 0, 0, 0, displayWidth, displayHeight, 0, 0,
-                                   windowWidth, windowHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            const bool composeUi = uiOn && uiMode == UiMode::Composite;
+            if (showInterpolated) {
+                compose(composeProgram, frameGen.output(), slot.interpolated, composeUi,
+                        tearLines ? static_cast<int>(presentedCounter % 1000000) : -1, true);
+                ++presentedCounter;
+            }
+            compose(composeProgram, *source, slot.real, composeUi,
+                    tearLines ? static_cast<int>(presentedCounter % 1000000) : -1, false);
+            ++presentedCounter;
         }
         timer.endFrame();
+
+        if (shotRequested || (lastFrame && options.autoShot)) {
+            const std::string path = shotRequested
+                                         ? "captures/shot_" + std::to_string(shotCounter++) + ".png"
+                                         : options.outputPath;
+            writeTexture(slot.real, path);
+            if (showInterpolated) {
+                const std::filesystem::path p(path);
+                writeTexture(slot.interpolated,
+                             (p.parent_path() / (p.stem().string() + "_interp" + p.extension().string()))
+                                 .string());
+            }
+            shotRequested = false;
+        }
 
         const double cpuMs =
             static_cast<double>(SDL_GetPerformanceCounter() - cpuStart) / frequency * 1000.0;
@@ -1087,13 +1507,20 @@ int main(int argc, char** argv) {
             if (options.validateFg)
                 csv << ',' << lastFg.psnr << ',' << lastFg.ssim << ',' << lastFgBlend.psnr
                     << ',' << lastFgBlend.ssim;
+            if (options.validateFg && uiMode != UiMode::None)
+                csv << ',' << lastHud.psnr << ',' << lastHud.ssim << ',' << lastHudBlend.psnr
+                    << ',' << lastHudBlend.ssim;
             csv << '\n';
         }
 
-        SDL_GL_SwapWindow(window);
+        // No fence: see frame_pacer.h. The render thread waits for its own GPU
+        // work here, so "ready" in the present log is when the frame was done.
+        glFinish();
+        pacer.submit(slotIndex, frameCounter, showInterpolated, sampleMs);
+        drainPresents();
 
         ++frameCounter;
-        if (options.frameLimit > 0 && frameCounter >= options.frameLimit) {
+        if (lastFrame) {
             if (options.validateMv && mvSamples > 0) {
                 const double n = mvSamples;
                 std::printf("[validate-mv] frames=%d\n", mvSamples);
@@ -1130,8 +1557,25 @@ int main(int argc, char** argv) {
                             flowEpeSum / n, 100.0 * flowWithin1Sum / n,
                             100.0 * flowWithin2Sum / n, flowWorstEpe);
             }
-            if (options.autoShot)
-                writeImage(presentFbo.id, displayWidth, displayHeight, options.outputPath);
+            if (options.validateFg && fgSamples > 0) {
+                const double n = fgSamples;
+                std::printf("[validate-fg] %dx%d  field %dx%d  frames=%d\n", displayWidth,
+                            displayHeight, frameGen.fieldWidth(), frameGen.fieldHeight(),
+                            fgSamples);
+                std::printf("              interpolated  PSNR %6.2f dB   SSIM %.4f"
+                            "   worst frame %6.2f dB\n",
+                            fgPsnrSum / n, fgSsimSum / n, fgWorstPsnr);
+                std::printf("              50/50 blend   PSNR %6.2f dB   SSIM %.4f\n",
+                            fgBlendPsnrSum / n, fgBlendSsimSum / n);
+                std::printf("              gain          %+6.2f dB   %+.4f\n",
+                            (fgPsnrSum - fgBlendPsnrSum) / n, (fgSsimSum - fgBlendSsimSum) / n);
+                if (uiMode != UiMode::None) {
+                    std::printf("              HUD region (%s)  PSNR %6.2f dB   SSIM %.4f"
+                                "   blend %6.2f dB / %.4f\n",
+                                uiMode == UiMode::Baked ? "baked" : "composite", hudPsnrSum / n,
+                                hudSsimSum / n, hudBlendPsnrSum / n, hudBlendSsimSum / n);
+                }
+            }
             for (const gfx::GpuTimer::Result& r : timer.results())
                 std::printf("[gpu] %-24s %7.3f ms (last %7.3f)\n", r.name.c_str(), r.ms, r.lastMs);
             std::printf("[gpu] %-24s %7.3f ms (last %7.3f)\n", "TOTAL", timer.totalMs(),
@@ -1145,9 +1589,11 @@ int main(int argc, char** argv) {
             const double fps = framesSinceStat / statTimer;
             const double cpuMs = cpuMsAccum / framesSinceStat;
             char title[256];
-            std::snprintf(title, sizeof(title), "fsr3lite | %s %dx%d -> %dx%d | %.1f FPS | GPU %.2f ms | CPU %.2f ms",
-                          scaleLabel, renderWidth, renderHeight, displayWidth,
-                          displayHeight, fps, timer.totalMs(), cpuMs);
+            std::snprintf(title, sizeof(title),
+                          "fsr3lite | %s %dx%d -> %dx%d | %.1f FPS rendered, %.1f presented | "
+                          "GPU %.2f ms | CPU %.2f ms",
+                          scaleLabel, renderWidth, renderHeight, displayWidth, displayHeight, fps,
+                          pacer.presentedFps(), timer.totalMs(), cpuMs);
             SDL_SetWindowTitle(window, title);
             statTimer = 0.0;
             framesSinceStat = 0;
@@ -1155,13 +1601,64 @@ int main(int argc, char** argv) {
         }
     }
 
+    pacer.stop();
+    drainPresents();
+    if (!presentHistory.empty()) {
+        // Summary of what reached the screen; scripts/run_pacing.py does the
+        // full analysis from --present-csv.
+        std::vector<double> intervals;
+        double realLatency = 0.0, firstLatency = 0.0;
+        int reals = 0, generated = 0;
+        for (size_t i = 0; i < presentHistory.size(); ++i) {
+            const present::PresentRecord& r = presentHistory[i];
+            if (i > 0) intervals.push_back(r.presentMs - presentHistory[i - 1].presentMs);
+            if (r.interpolated) {
+                firstLatency += r.presentMs - r.sampleMs;
+                ++generated;
+            } else {
+                realLatency += r.presentMs - r.sampleMs;
+                ++reals;
+            }
+        }
+        if (!intervals.empty()) {
+            double mean = 0.0, var = 0.0;
+            for (double v : intervals) mean += v;
+            mean /= intervals.size();
+            for (double v : intervals) var += (v - mean) * (v - mean);
+            var /= intervals.size();
+            std::vector<double> sorted = intervals;
+            std::sort(sorted.begin(), sorted.end());
+            const double p99 = sorted[static_cast<size_t>(0.99 * (sorted.size() - 1))];
+            std::printf("[present] %zu presents (%d real, %d generated)  interval mean %.3f ms "
+                        "(%.1f fps)  std %.3f ms  p99 %.3f ms\n",
+                        presentHistory.size(), reals, generated, mean, 1000.0 / mean,
+                        std::sqrt(var), p99);
+            std::printf("[present] latency sample -> real frame %.2f ms", reals ? realLatency / reals : 0.0);
+            if (generated) std::printf("   sample -> generated frame %.2f ms", firstLatency / generated);
+            std::printf("\n");
+        }
+    }
+    pacer.destroy();
+    hud.destroy();
+    composeProgram.destroy();
+    composeHdrProgram.destroy();
+    bakedFrame.destroy();
+    gtMidUi.destroy();
+    fgUi.destroy();
+    blendUi.destroy();
+    hudCandidate.destroy();
+    hudReference.destroy();
+    hudBlend.destroy();
+    if (loadCreated) loadBuffer.destroy();
     timer.destroy();
     imageMetrics.destroy();
+    frameGen.destroy();
     flow.destroy();
     upscaler.destroy();
     ldrInput.destroy();
     gtLinear.destroy();
     gtLdr.destroy();
+    gtMidLdr.destroy();
     prevOutput.destroy();
     prevGtLdr.destroy();
     gtBuffer.destroy();
@@ -1173,6 +1670,8 @@ int main(int argc, char** argv) {
     scene.destroy();
     glDeleteVertexArrays(1, &emptyVao);
     SDL_GL_DeleteContext(context);
+    SDL_GL_DeleteContext(presentContext);
+    SDL_DestroyWindow(renderWindow);
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;

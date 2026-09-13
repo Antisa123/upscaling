@@ -25,8 +25,13 @@
 //
 // When neither field has anything to say, the fallback is the 50/50 blend --
 // the same image the naive baseline produces, which is the floor this module
-// has to beat overall. Those pixels are marked in the alpha channel so M8's
-// inpainting can find them.
+// has to beat overall.
+//
+// M8: alpha is coverage -- how much of this pixel came from a sample the warp
+// had a right to take. A side whose half-vector lands outside the frame, or
+// on a surface the mask says is hidden, contributes nothing to it. Passes 8
+// and 9 (fg_inpaint_pyramid.comp, fg_inpaint.comp) fill whatever falls short
+// of 1 from the surrounding covered pixels.
 
 #include "fg_common.glsl"
 
@@ -49,32 +54,67 @@ uniform int uMaskEnabled;
 // Colour distance that costs a candidate a factor of e of its weight. Larger
 // makes the choice between the two fields sharper.
 uniform float uAgreement;
+// Multiplier on the flow candidate's weight. Colour agreement cannot see the
+// one failure block matching is built to make: on a periodic texture -- a
+// striped pillar, a tiled floor -- a vector that is off by exactly one period
+// lands the pattern on itself, and its two warps agree as well as the right
+// vector's do. The game vectors cannot make that mistake, so where both
+// fields agree equally well on colour the tie should go to geometry.
+uniform float uFlowBias;
 // First frame, or the frame after a cut: there is no previous image to
 // interpolate towards, so the interpolated frame is a copy of the current one.
 // Showing a blend of two unrelated images would be strictly worse than showing
 // the same frame twice.
 uniform int uReset;
+// Reject a warp side whose sample position is off screen. Clamp-to-edge
+// sampling hands back the border pixel there, which is a colour, but not the
+// colour of anything at this pixel -- and it is at the frame edge, where the
+// camera's motion is uncovering scenery neither frame contains.
+uniform int uBoundsCheck;
+// 1: a side the disocclusion mask rejects also counts against coverage, so a
+// pixel both masks reject is handed to the image inpainting. 0: only an
+// off-screen sample makes a hole, and a doubly-masked pixel keeps the blend of
+// both sides, weighted by colour agreement like any other candidate.
+uniform int uCoverageMasks;
 
 struct Candidate {
     vec3 color;
     float weight;
+    float coverage;
 };
 
-Candidate warp(vec2 uv, vec2 mv, vec2 occ) {
-    const vec3 fromPrev = texture(uPrevious, uv + 0.5 * mv).rgb;
-    const vec3 fromCur = texture(uCurrent, uv - 0.5 * mv).rgb;
+float onScreen(vec2 uv) {
+    if (uBoundsCheck == 0) return 1.0;
+    return all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))) ? 1.0 : 0.0;
+}
 
-    float wPrev = 1.0 - occ.x;
-    float wCur = 1.0 - occ.y;
-    // Both directions rejected: the masks disagree with each other, which is
-    // information we do not have a use for. Fall back to an equal blend and
-    // let the colour evidence below decide how much this candidate is worth.
+Candidate warp(vec2 uv, vec2 mv, vec2 occ) {
+    const vec2 uvPrev = uv + 0.5 * mv;
+    const vec2 uvCur = uv - 0.5 * mv;
+    const vec3 fromPrev = texture(uPrevious, uvPrev).rgb;
+    const vec3 fromCur = texture(uCurrent, uvCur).rgb;
+    const float inPrev = onScreen(uvPrev);
+    const float inCur = onScreen(uvCur);
+
+    float wPrev = (1.0 - occ.x) * inPrev;
+    float wCur = (1.0 - occ.y) * inCur;
+    const float coverage = uCoverageMasks != 0 ? clamp(wPrev + wCur, 0.0, 1.0)
+                                               : clamp(inPrev + inCur, 0.0, 1.0);
+    // Both directions rejected: the masks disagree with each other, or the
+    // vector leaves the frame both ways. Fall back to an equal blend of what
+    // is on screen and let the colour evidence below decide how much this
+    // candidate is worth; coverage says it is a guess.
     if (wPrev + wCur < 1e-3) {
-        wPrev = 0.5;
-        wCur = 0.5;
+        wPrev = 0.5 * inPrev;
+        wCur = 0.5 * inCur;
+        if (wPrev + wCur < 1e-3) {
+            wPrev = 0.5;
+            wCur = 0.5;
+        }
     }
 
     Candidate c;
+    c.coverage = coverage;
     c.color = (wPrev * fromPrev + wCur * fromCur) / (wPrev + wCur);
     // The two ends only constitute a second opinion where both were usable.
     const float both = min(wPrev, wCur) / max(max(wPrev, wCur), 1e-6);
@@ -90,7 +130,7 @@ void main() {
     const vec3 cur = texture(uCurrent, uv).rgb;
     const vec3 prev = texture(uPrevious, uv).rgb;
     if (uReset != 0) {
-        imageStore(uOutput, pos, vec4(cur, 1.0));
+        imageStore(uOutput, pos, vec4(cur, 1.0));  // a copy is fully covered
         imageStore(uDebug, pos, vec4(0.0, 0.0, 1.0, 1.0));
         return;
     }
@@ -105,18 +145,21 @@ void main() {
     if (uFlowEnabled != 0) flow = fgFetchField(uFlowField, uv, uFieldSize, uLevels, flowLevel);
 
     vec3 color = 0.5 * (cur + prev);
-    float confidence = 0.0;
+    // No vector at all: the blend is not an interpolation of anything.
+    float coverage = 0.0;
     if (game.w > 0.5 || flow.w > 0.5) {
-        const Candidate g = game.w > 0.5 ? warp(uv, game.xy, occ) : Candidate(vec3(0.0), 0.0);
-        const Candidate f = flow.w > 0.5 ? warp(uv, flow.xy, occ) : Candidate(vec3(0.0), 0.0);
+        const Candidate none = Candidate(vec3(0.0), 0.0, 0.0);
+        const Candidate g = game.w > 0.5 ? warp(uv, game.xy, occ) : none;
+        Candidate f = flow.w > 0.5 ? warp(uv, flow.xy, occ) : none;
+        if (game.w > 0.5) f.weight *= uFlowBias;
         const float sum = g.weight + f.weight;
         if (sum > 1e-6) {
             color = (g.weight * g.color + f.weight * f.color) / sum;
-            confidence = max(g.weight, f.weight);
+            coverage = (g.weight * g.coverage + f.weight * f.coverage) / sum;
         }
     }
 
-    imageStore(uOutput, pos, vec4(color, confidence));
+    imageStore(uOutput, pos, vec4(color, coverage));
     // Red and green are the two masks; blue is how far up the pyramid this
     // pixel's vector had to be fetched from, i.e. how much of the frame is
     // being carried by inpainted motion rather than measured motion.

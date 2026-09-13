@@ -26,8 +26,10 @@ public:
 
     // Graphics program from vertex + fragment shader file names.
     static Program graphics(const std::string& vertFile, const std::string& fragFile);
-    // Compute program from a single file name.
-    static Program compute(const std::string& compFile);
+    // Compute program from a single file name. `defines` is inserted right
+    // after the #version line, so one source can be compiled into several
+    // specialisations with constant loop bounds (the ML layers need that).
+    static Program compute(const std::string& compFile, const std::string& defines = {});
 
     // GL objects must be released while the context is still current, so
     // teardown is explicit rather than left to the destructor.
@@ -67,6 +69,7 @@ private:
 
     GLuint program_ = 0;
     std::vector<Stage> stages_;
+    std::string defines_;
     // All files that contributed to the last successful build (sources +
     // includes) with the timestamp they had at that point.
     std::vector<std::pair<std::filesystem::path, std::filesystem::file_time_type>> deps_;

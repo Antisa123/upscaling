@@ -63,10 +63,15 @@ bool preprocess(const std::filesystem::path& path, std::string& out,
 }
 
 GLuint compileStage(GLenum type, const std::filesystem::path& path,
-                    std::vector<std::filesystem::path>& deps) {
+                    std::vector<std::filesystem::path>& deps, const std::string& defines) {
     std::string source;
     std::unordered_set<std::string> seen;
     if (!preprocess(path, source, deps, seen)) return 0;
+    if (!defines.empty()) {
+        const size_t version = source.find("#version");
+        const size_t eol = version == std::string::npos ? std::string::npos : source.find('\n', version);
+        if (eol != std::string::npos) source.insert(eol + 1, defines + "\n#line 2 0\n");
+    }
 
     const GLuint shader = glCreateShader(type);
     const char* csrc = source.c_str();
@@ -109,6 +114,7 @@ Program& Program::operator=(Program&& other) noexcept {
         if (program_) glDeleteProgram(program_);
         program_ = other.program_;
         stages_ = std::move(other.stages_);
+        defines_ = std::move(other.defines_);
         deps_ = std::move(other.deps_);
         other.program_ = 0;
     }
@@ -122,9 +128,10 @@ Program Program::graphics(const std::string& vertFile, const std::string& fragFi
     return p;
 }
 
-Program Program::compute(const std::string& compFile) {
+Program Program::compute(const std::string& compFile, const std::string& defines) {
     Program p;
     p.stages_ = {{GL_COMPUTE_SHADER, compFile}};
+    p.defines_ = defines;
     p.build();
     return p;
 }
@@ -135,7 +142,7 @@ bool Program::build() {
     bool ok = true;
 
     for (const Stage& stage : stages_) {
-        const GLuint s = compileStage(stage.type, g_shaderDir / stage.file, deps);
+        const GLuint s = compileStage(stage.type, g_shaderDir / stage.file, deps, defines_);
         if (!s) {
             ok = false;
             break;

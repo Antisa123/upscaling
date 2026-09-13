@@ -1,0 +1,40 @@
+#version 460 core
+
+// M8, pass 8: inpainting pyramid over the interpolated image.
+//
+// Pass 7 leaves a coverage value in alpha: 1 where a warp found an on-screen,
+// unoccluded sample on at least one side, falling towards 0 where every
+// candidate was rejected. Those pixels carry a guess. This pass builds the mip
+// chain the fill pass reads from, with every texel weighted by its coverage
+// (premultiplied), so a level's colour is the mean of only the pixels that
+// were actually interpolated: a hole does not bleed into its own fill.
+//
+// The first level is half the display resolution and is reduced straight from
+// the full-resolution output, which saves a display-resolution pass that would
+// do nothing but premultiply.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uSource;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+uniform int uFirst;  // 1: the source is the interpolated image, not yet premultiplied
+uniform int uSrcLevel;
+uniform ivec2 uSrcSize;
+uniform ivec2 uDstSize;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uDstSize))) return;
+
+    const ivec2 base = pos * 2;
+    vec4 sum = vec4(0.0);
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            vec4 v = texelFetch(uSource, min(base + ivec2(x, y), uSrcSize - 1), uSrcLevel);
+            if (uFirst != 0) v.rgb *= v.a;
+            sum += v;
+        }
+    }
+    imageStore(uOutput, pos, 0.25 * sum);
+}

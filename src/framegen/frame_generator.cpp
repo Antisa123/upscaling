@@ -6,14 +6,13 @@
 namespace framegen {
 
 namespace {
-constexpr unsigned kEmptyDepth = 0xFFFFFFFFu;
-
 void barrier() {
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 }
 }  // namespace
 
 void FrameGenerator::create() {
+    setup_ = gfx::Program::compute("fg_setup.comp");
     depth_ = gfx::Program::compute("fg_depth.comp");
     gameFieldProgram_ = gfx::Program::compute("fg_game_field.comp");
     flowFieldProgram_ = gfx::Program::compute("fg_flow_field.comp");
@@ -22,9 +21,13 @@ void FrameGenerator::create() {
     disocclusion_ = gfx::Program::compute("fg_disocclusion.comp");
     interpolate_ = gfx::Program::compute("fg_interpolate.comp");
     blendProgram_ = gfx::Program::compute("fg_blend.comp");
+    inpaintPyramid_ = gfx::Program::compute("fg_inpaint_pyramid.comp");
+    inpaint_ = gfx::Program::compute("fg_inpaint.comp");
+    if (!options_.mlWeights.empty() || options_.mlDump) ml_.create(options_.mlWeights, options_.mlDump);
 }
 
 void FrameGenerator::destroy() {
+    setup_.destroy();
     depth_.destroy();
     gameFieldProgram_.destroy();
     flowFieldProgram_.destroy();
@@ -33,6 +36,11 @@ void FrameGenerator::destroy() {
     disocclusion_.destroy();
     interpolate_.destroy();
     blendProgram_.destroy();
+    inpaintPyramid_.destroy();
+    inpaint_.destroy();
+    ml_.destroy();
+    mlValid_ = false;
+    imagePyramid_.destroy();
     depthField_.destroy();
     gameX_.destroy();
     gameY_.destroy();
@@ -50,6 +58,7 @@ void FrameGenerator::destroy() {
 }
 
 void FrameGenerator::reloadShaders() {
+    setup_.reloadIfChanged();
     depth_.reloadIfChanged();
     gameFieldProgram_.reloadIfChanged();
     flowFieldProgram_.reloadIfChanged();
@@ -58,6 +67,9 @@ void FrameGenerator::reloadShaders() {
     disocclusion_.reloadIfChanged();
     interpolate_.reloadIfChanged();
     blendProgram_.reloadIfChanged();
+    inpaintPyramid_.reloadIfChanged();
+    inpaint_.reloadIfChanged();
+    ml_.reloadShaders();
 }
 
 void FrameGenerator::ensureResources(int displayWidth, int displayHeight, int renderWidth,
@@ -93,6 +105,15 @@ void FrameGenerator::ensureResources(int displayWidth, int displayHeight, int re
     output_.ensure(displayWidth_, displayHeight_, GL_RGBA16F, 1, "fg.output");
     blend_.ensure(displayWidth_, displayHeight_, GL_RGBA16F, 1, "fg.blend");
     debug_.ensure(displayWidth_, displayHeight_, GL_RGBA8, 1, "fg.debug");
+    {
+        // Down to a top level a few texels across: a hole the size of the
+        // frame edge strip a fast pan uncovers still finds covered pixels.
+        const int w = std::max(displayWidth_ / 2, 1);
+        const int h = std::max(displayHeight_ / 2, 1);
+        int pyramidLevels = 1;
+        while (std::min(w >> pyramidLevels, h >> pyramidLevels) >= 4) ++pyramidLevels;
+        imagePyramid_.ensure(w, h, GL_RGBA16F, pyramidLevels, "fg.imagePyramid");
+    }
     historyValid_ = false;
 }
 
@@ -127,6 +148,42 @@ void FrameGenerator::buildPyramid(gfx::Texture2D& resolved) {
         pyramid_.dispatch(dstW, dstH);
         barrier();
     }
+}
+
+void FrameGenerator::inpaintImage(gfx::GpuTimer& timer) {
+    gfx::GpuScope scope(timer, "FG image inpaint");
+    // Pass 8: the pyramid. Level 0 is reduced straight from the output.
+    inpaintPyramid_.bind();
+    inpaintPyramid_.set("uSource", 0);
+    for (int l = 0; l < imagePyramid_.levels; ++l) {
+        const bool first = l == 0;
+        const int srcW = first ? displayWidth_ : std::max(imagePyramid_.width >> (l - 1), 1);
+        const int srcH = first ? displayHeight_ : std::max(imagePyramid_.height >> (l - 1), 1);
+        const int dstW = std::max(imagePyramid_.width >> l, 1);
+        const int dstH = std::max(imagePyramid_.height >> l, 1);
+        if (first)
+            output_.bindTexture(0);
+        else
+            imagePyramid_.bindTexture(0);
+        imagePyramid_.bindImage(0, GL_WRITE_ONLY, l);
+        inpaintPyramid_.set("uFirst", first ? 1 : 0);
+        inpaintPyramid_.set("uSrcLevel", first ? 0 : l - 1);
+        inpaintPyramid_.set("uSrcSize", srcW, srcH);
+        inpaintPyramid_.set("uDstSize", dstW, dstH);
+        inpaintPyramid_.dispatch(dstW, dstH);
+        barrier();
+    }
+
+    // Pass 9: fill in place.
+    inpaint_.bind();
+    imagePyramid_.bindTexture(0);
+    inpaint_.set("uPyramid", 0);
+    output_.bindImage(0, GL_READ_WRITE);
+    inpaint_.set("uDisplaySize", displayWidth_, displayHeight_);
+    inpaint_.set("uLevels", imagePyramid_.levels);
+    inpaint_.set("uMinCoverage", options_.inpaintMinCoverage);
+    inpaint_.dispatch(displayWidth_, displayHeight_);
+    barrier();
 }
 
 void FrameGenerator::scatterFields(const Inputs& in, gfx::GpuTimer& timer) {
@@ -175,6 +232,7 @@ void FrameGenerator::scatterFields(const Inputs& in, gfx::GpuTimer& timer) {
                               static_cast<float>(fieldH_));
         gameFieldProgram_.set("uHasDilated", hasDilated ? 1 : 0);
         gameFieldProgram_.set("uDepthTolerance", options_.depthTolerance);
+        gameFieldProgram_.set("uColorPriority", options_.colorPriority ? 1 : 0);
         gameFieldProgram_.dispatch(in.renderWidth, in.renderHeight);
         barrier();
         resolveField(gameX_, gameY_, gameField_);
@@ -199,6 +257,7 @@ void FrameGenerator::scatterFields(const Inputs& in, gfx::GpuTimer& timer) {
                               static_cast<float>(displayHeight_));
         flowFieldProgram_.set("uErrorThreshold", options_.flowErrorThreshold);
         flowFieldProgram_.set("uMagnitudeScale", options_.flowMagnitudeScale);
+        flowFieldProgram_.set("uColorPriority", options_.colorPriority ? 1 : 0);
         flowFieldProgram_.dispatch(fieldW_, fieldH_);
         barrier();
         resolveField(flowX_, flowY_, flowField_);
@@ -228,54 +287,10 @@ const gfx::Texture2D& FrameGenerator::dispatch(const Inputs& in, gfx::GpuTimer& 
     ensureResources(in.current->width, in.current->height, in.renderWidth, in.renderHeight);
     const bool reset = in.reset || !historyValid_;
 
-    gfx::GpuScope outer(timer, "Frame generation");
-
-    // Pass 1, setup. The scatter targets are accumulators, so every frame
-    // starts from "nothing here": 0 is an impossible priority and 0xFFFFFFFF
-    // an impossible depth, which is what lets the later passes tell an empty
-    // texel from a real sample without a separate coverage image.
-    if (!reset) {
-        gfx::GpuScope scope(timer, "FG setup");
-        depthField_.clearUint(kEmptyDepth);
-        gameX_.clearUint(0);
-        gameY_.clearUint(0);
-        flowX_.clearUint(0);
-        flowY_.clearUint(0);
-        glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-        scatterFields(in, timer);
-    }
-
-    const bool useFlow = options_.flowField && in.flow != nullptr && in.flow->valid();
-    {
-        gfx::GpuScope scope(timer, "FG interpolate");
-        interpolate_.bind();
-        in.current->bindTexture(0);
-        interpolate_.set("uCurrent", 0);
-        prevColor_.bindTexture(1);
-        interpolate_.set("uPrevious", 1);
-        gameField_.bindTexture(2);
-        interpolate_.set("uGameField", 2);
-        flowField_.bindTexture(3);
-        interpolate_.set("uFlowField", 3);
-        masks_.bindTexture(4);
-        interpolate_.set("uMasks", 4);
-        output_.bindImage(0, GL_WRITE_ONLY);
-        debug_.bindImage(1, GL_WRITE_ONLY);
-        interpolate_.set("uDisplaySize", static_cast<float>(displayWidth_),
-                         static_cast<float>(displayHeight_));
-        interpolate_.set("uFieldSize", fieldW_, fieldH_);
-        interpolate_.set("uLevels", levels_);
-        interpolate_.set("uGameEnabled", options_.gameField ? 1 : 0);
-        interpolate_.set("uFlowEnabled", useFlow ? 1 : 0);
-        interpolate_.set("uMaskEnabled", options_.masks && options_.gameField ? 1 : 0);
-        interpolate_.set("uAgreement", options_.agreement);
-        interpolate_.set("uReset", reset ? 1 : 0);
-        interpolate_.dispatch(displayWidth_, displayHeight_);
-        barrier();
-    }
-
-    if (options_.measureBlend) {
+    // Runs before the module's own scope opens, and before this frame's image
+    // replaces the stored previous one: the baseline has to see exactly the
+    // same pair the interpolation sees.
+    if (options_.measureBlend && !reset) {
         // Named as a reference pass: it is timed and reported but must not
         // count towards the cost of the pipeline, which never runs it.
         gfx::GpuScope scope(timer, "ref: FG blend");
@@ -291,10 +306,92 @@ const gfx::Texture2D& FrameGenerator::dispatch(const Inputs& in, gfx::GpuTimer& 
         barrier();
     }
 
-    glCopyImageSubData(in.current->id, GL_TEXTURE_2D, 0, 0, 0, 0, prevColor_.id, GL_TEXTURE_2D, 0,
-                       0, 0, 0, displayWidth_, displayHeight_, 1);
+    {
+        gfx::GpuScope outer(timer, "Frame generation");
+
+        // Pass 1, setup. The scatter targets are accumulators, so every frame
+        // starts from "nothing here": 0 is an impossible priority and 0xFFFFFFFF
+        // an impossible depth, which is what lets the later passes tell an empty
+        // texel from a real sample without a separate coverage image.
+        if (!reset) {
+            {
+                gfx::GpuScope scope(timer, "FG setup");
+                setup_.bind();
+                depthField_.bindImage(0, GL_WRITE_ONLY);
+                gameX_.bindImage(1, GL_WRITE_ONLY);
+                gameY_.bindImage(2, GL_WRITE_ONLY);
+                flowX_.bindImage(3, GL_WRITE_ONLY);
+                flowY_.bindImage(4, GL_WRITE_ONLY);
+                setup_.set("uFieldSize", fieldW_, fieldH_);
+                setup_.dispatch(fieldW_, fieldH_);
+                glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+            }
+            scatterFields(in, timer);
+        }
+
+        const bool useFlow = options_.flowField && in.flow != nullptr && in.flow->valid();
+        {
+            gfx::GpuScope scope(timer, "FG interpolate");
+            interpolate_.bind();
+            in.current->bindTexture(0);
+            interpolate_.set("uCurrent", 0);
+            prevColor_.bindTexture(1);
+            interpolate_.set("uPrevious", 1);
+            gameField_.bindTexture(2);
+            interpolate_.set("uGameField", 2);
+            flowField_.bindTexture(3);
+            interpolate_.set("uFlowField", 3);
+            masks_.bindTexture(4);
+            interpolate_.set("uMasks", 4);
+            output_.bindImage(0, GL_WRITE_ONLY);
+            debug_.bindImage(1, GL_WRITE_ONLY);
+            interpolate_.set("uDisplaySize", static_cast<float>(displayWidth_),
+                             static_cast<float>(displayHeight_));
+            interpolate_.set("uFieldSize", fieldW_, fieldH_);
+            interpolate_.set("uLevels", levels_);
+            interpolate_.set("uGameEnabled", options_.gameField ? 1 : 0);
+            interpolate_.set("uFlowEnabled", useFlow ? 1 : 0);
+            interpolate_.set("uMaskEnabled", options_.masks && options_.gameField ? 1 : 0);
+            interpolate_.set("uAgreement", options_.agreement);
+            interpolate_.set("uFlowBias", options_.flowBias);
+            interpolate_.set("uReset", reset ? 1 : 0);
+            interpolate_.set("uBoundsCheck", options_.boundsCheck ? 1 : 0);
+            interpolate_.set("uCoverageMasks", options_.coverageMasks ? 1 : 0);
+            interpolate_.dispatch(displayWidth_, displayHeight_);
+            barrier();
+        }
+
+        // A reset frame is a copy, fully covered: nothing to fill.
+        if (options_.imageInpaint && !reset) inpaintImage(timer);
+
+        // M9: the learned blend reads everything above, including the
+        // previous frame, so it runs before that is overwritten.
+        mlValid_ = false;
+        if (ml_.enabled() && !reset) {
+            MlInputs ml;
+            ml.current = in.current;
+            ml.previous = &prevColor_;
+            ml.gameField = &gameField_;
+            ml.flowField = &flowField_;
+            ml.masks = &masks_;
+            ml.heuristic = &output_;
+            ml.fieldWidth = fieldW_;
+            ml.fieldHeight = fieldH_;
+            ml.levels = levels_;
+            ml.game = options_.gameField;
+            ml.flow = useFlow;
+            ml.masksEnabled = options_.masks && options_.gameField;
+            mlValid_ = ml_.dispatch(ml, timer);
+        }
+
+        // Kept inside the module's scope: the pipeline needs this frame as next
+        // frame's "previous", so the copy is part of its cost.
+        glCopyImageSubData(in.current->id, GL_TEXTURE_2D, 0, 0, 0, 0, prevColor_.id, GL_TEXTURE_2D, 0,
+                           0, 0, 0, displayWidth_, displayHeight_, 1);
+    }
+
     historyValid_ = true;
-    return output_;
+    return output();
 }
 
 }  // namespace framegen

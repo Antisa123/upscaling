@@ -49,6 +49,30 @@ FLOW_COLUMNS = [
     ("epe_within2", "unutar 2 px (%)", "pct"),
 ]
 
+# The interpolated frame is scored against a real render of the instant it
+# stands for, and so is the 50/50 blend of the same two input frames. Both are
+# in every table because neither number means much alone: the blend is what
+# frame generation costs nothing to beat on a still image and a lot on a
+# moving one, and the gap between the two columns is the module's whole value.
+FG_COLUMNS = [
+    ("psnr_fg", "PSNR interp. (dB)", "mean"),
+    ("psnr_fg", "PSNR interp. min (dB)", "min"),
+    ("ssim_fg", "SSIM interp.", "mean"),
+    ("psnr_blend", "PSNR blend (dB)", "mean"),
+    ("ssim_blend", "SSIM blend", "mean"),
+]
+
+# M8. With a HUD on screen the reference is the real midpoint frame with the
+# HUD composed over it, and the HUD rectangle is also scored on its own: over
+# the whole frame a smeared HUD is a few hundred pixels out of two million and
+# barely moves the mean, which is exactly why it has to be measured where it is.
+FG_HUD_COLUMNS = [
+    *FG_COLUMNS,
+    ("psnr_hud", "PSNR HUD (dB)", "mean"),
+    ("ssim_hud", "SSIM HUD", "mean"),
+    ("psnr_hud_blend", "PSNR HUD blend (dB)", "mean"),
+]
+
 # A group is (extra arguments for every row, extra columns, table title).
 GROUPS = {
     "mv": (
@@ -196,6 +220,41 @@ GROUPS = {
         ["--validate-flow", "--jitter"],
         FLOW_COLUMNS,
         "Optical flow: tocnost u ovisnosti o brzini kamere (Sponza, Quality 1.5x)",
+    ),
+    # M7. The reference is rendered at t - dt/2 along the scripted path, so
+    # every row needs --scripted (COMMON has it) and a temporal upscaler to
+    # produce the display-resolution pair the module interpolates between.
+    "fg": (
+        ["--validate-fg", "--jitter"],
+        FG_COLUMNS,
+        "Generiranje okvira (M7): kvaliteta po razlucivosti i cijena",
+    ),
+    "fg-ablation": (
+        ["--validate-fg", "--jitter"],
+        FG_COLUMNS,
+        "Generiranje okvira: ablacije (Sponza, 60 fps orbita, Quality 1.5x)",
+    ),
+    "fg-speed": (
+        ["--validate-fg", "--jitter"],
+        FG_COLUMNS,
+        "Generiranje okvira: kvaliteta u ovisnosti o brzini kamere (Quality 1.5x)",
+    ),
+    "fg-hud": (
+        ["--validate-fg", "--jitter"],
+        FG_HUD_COLUMNS,
+        "UI kompozicija (M8): HUD nakon generiranja okvira ili upečen prije njega",
+    ),
+    # M9. Every row pairs the heuristic with the learned blend on the same
+    # view, so the table reads without looking anything up elsewhere.
+    "fg-ml": (
+        ["--validate-fg", "--jitter"],
+        FG_COLUMNS,
+        "Naucena mjesavina (M9) naspram heuristike, putanje izvan skupa za ucenje",
+    ),
+    "fg-ml-models": (
+        ["--validate-fg", "--jitter"],
+        FG_COLUMNS,
+        "Naucena mjesavina: velicina mreze i sastav skupa za ucenje",
     ),
 }
 
@@ -480,6 +539,158 @@ if SPONZA.exists():
              "--warmup", str(_warm), "--frames", str(_total)],
         ))
 
+# M7. Same framing and pipeline as the flow rows, for the same reason: frame
+# generation consumes the upscaled image and the flow field, so both are part
+# of its input. No 4K row: the reference is supersampled 2x2, and an 8K
+# G-buffer does not fit next to the pipeline in the RX 580's 8 GB.
+if SPONZA.exists():
+    _FG_BASE = [*FHD, "--scale", "1.5", "--upscaler", "fsr", *SPONZA_ARGS]
+
+    RUNS += [
+        ("fg", "fg-1080p-q", "1080p, render 1280x720, FSR", _FG_BASE),
+        ("fg", "fg-1080p-native", "1080p native (FSR 1.0x)",
+         [*FHD, "--scale", "1.0", "--upscaler", "fsr", *SPONZA_ARGS]),
+        ("fg", "fg-1080p-p", "1080p, render 960x540, FSR",
+         [*FHD, "--scale", "2.0", "--upscaler", "fsr", *SPONZA_ARGS]),
+        ("fg", "fg-720p-q", "1280x720, render 854x480, FSR",
+         ["--width", "1280", "--height", "720", "--scale", "1.5",
+          "--upscaler", "fsr", *SPONZA_ARGS]),
+    ]
+
+    # The first four rows take the module apart by source of motion: game
+    # vectors only, flow only, neither (which must reproduce the blend column
+    # exactly -- a check on the harness as much as on the module).
+    _FG_ABLATIONS = [
+        ("game-only", "samo game vektori", ["--fg-flow", "0"]),
+        ("flow-only", "samo optical flow", ["--fg-game", "0"]),
+        ("no-vectors", "bez vektora (= blend)", ["--fg-game", "0", "--fg-flow", "0"]),
+        ("no-masks", "bez maski disokluzije", ["--fg-masks", "0"]),
+        ("no-dilate", "bez dilatiranih vektora", ["--fg-dilate", "0"]),
+        ("pick-nearest", "piramida: najblizi umjesto pozadine", ["--fg-inpaint-pick", "0"]),
+        ("color", "s bojom u prioritetu scattera", ["--fg-color-priority", "1"]),
+        *[(f"flow-bias-{v.replace('.', '')}", f"tezina toka uz game vektor {v}",
+           ["--fg-flow-bias", v]) for v in ("1", "0.5", "0.25", "0.1")],
+        *[(f"levels-{v}", f"{v} razina piramide polja", ["--fg-levels", v])
+          for v in ("1", "3", "5", "7")],
+        *[(f"agree-{v}", f"ostrina slaganja boja {v}", ["--fg-agreement", v])
+          for v in ("0", "6", "24", "96")],
+        *[(f"depth-{v.replace('.', '')}", f"tolerancija dubine {v}", ["--fg-depth", v])
+          for v in ("0.005", "0.02", "0.08")],
+        # M8, passes 8-9 and the off-screen sample rejection. "m7" turns both
+        # off and must reproduce the M7 default row of docs/FRAMEGEN.md exactly.
+        ("no-inpaint", "bez inpaintinga slike (prolazi 8-9)", ["--fg-inpaint", "0"]),
+        ("no-bounds", "bez odbacivanja uzoraka izvan ekrana", ["--fg-bounds", "0"]),
+        ("m7", "kao M7: bez inpaintinga i provjere granica",
+         ["--fg-inpaint", "0", "--fg-bounds", "0"]),
+        *[(f"coverage-{v.replace('.', '')}", f"prag pokrivenosti inpaintinga {v}",
+           ["--fg-inpaint-coverage", v]) for v in ("0.1", "0.3", "0.6")],
+    ]
+    RUNS.append(("fg-ablation", "fg-default", "Sve zadano", _FG_BASE))
+    for _tag, _desc, _args in _FG_ABLATIONS:
+        RUNS.append(("fg-ablation", f"fg-{_tag}", _desc, [*_FG_BASE, *_args]))
+
+    # Sponza is static geometry, so there the game vectors are exact everywhere
+    # and the flow field can only lose to them. The procedural scene has boxes
+    # orbiting and spinning past pillars, which is where disocclusion masks and
+    # a second source of motion have something to do. Same knobs, other scene.
+    _FG_PROC = [*FHD, "--scale", "1.5", "--upscaler", "fsr"]
+    for _tag, _desc, _args in (("default", "Sve zadano", []),
+                               ("game-only", "samo game vektori", ["--fg-flow", "0"]),
+                               ("flow-only", "samo optical flow", ["--fg-game", "0"]),
+                               ("no-vectors", "bez vektora (= blend)",
+                                ["--fg-game", "0", "--fg-flow", "0"]),
+                               ("no-masks", "bez maski disokluzije", ["--fg-masks", "0"]),
+                               ("pick-nearest", "piramida: najblizi umjesto pozadine",
+                                ["--fg-inpaint-pick", "0"]),
+                               ("color", "s bojom u prioritetu scattera",
+                                ["--fg-color-priority", "1"]),
+                               ("no-inpaint", "bez inpaintinga slike (prolazi 8-9)",
+                                ["--fg-inpaint", "0"]),
+                               ("no-bounds", "bez odbacivanja uzoraka izvan ekrana",
+                                ["--fg-bounds", "0"]),
+                               ("m7", "kao M7: bez inpaintinga i provjere granica",
+                                ["--fg-inpaint", "0", "--fg-bounds", "0"]),
+                               *[(f"flow-bias-{v.replace('.', '')}",
+                                  f"tezina toka uz game vektor {v}", ["--fg-flow-bias", v])
+                                 for v in ("1", "0.5", "0.25", "0.1")]):
+        RUNS.append(("fg-ablation", f"fg-proc-{_tag}", f"proceduralna scena: {_desc}",
+                     [*_FG_PROC, *_args]))
+
+    # Window fixed in scene time, as for the flow: half a second of warm-up and
+    # one second measured at every rate. The still camera is a sanity row --
+    # with nothing moving the blend is already exact, and the module must not
+    # make it worse.
+    for _dt, _fps in (("0.0000001", "mirna kamera"), ("0.0083333", "120 fps"),
+                      ("0.0166667", "60 fps"), ("0.0333333", "30 fps"),
+                      ("0.05", "20 fps")):
+        _step = float(_dt)
+        _warm = 16 if _step < 1e-4 else round(0.5 / _step)
+        _total = _warm + (60 if _step < 1e-4 else round(1.0 / _step))
+        RUNS.append((
+            "fg-speed", f"fg-speed-{_dt.replace('.', '')}", _fps,
+            [*_FG_BASE, "--fixed-dt", _dt,
+             "--warmup", str(_warm), "--frames", str(_total)],
+        ))
+        # M8: the image inpainting only has work where a warp leaves the frame
+        # or both sides are masked, and there is most of that at low frame rates.
+        if _step >= 0.03:
+            RUNS.append((
+                "fg-speed", f"fg-speed-{_dt.replace('.', '')}-m7", f"{_fps}, kao M7",
+                [*_FG_BASE, "--fixed-dt", _dt, "--warmup", str(_warm),
+                 "--frames", str(_total), "--fg-inpaint", "0", "--fg-bounds", "0"],
+            ))
+
+    # M8: the HUD, composed after frame generation or baked in before it.
+    RUNS += [
+        ("fg-hud", "fg-hud-composite", "HUD nakon generiranja (kompozicija)",
+         [*_FG_BASE, "--ui", "composite"]),
+        ("fg-hud", "fg-hud-baked", "HUD upečen prije generiranja",
+         [*_FG_BASE, "--ui", "baked"]),
+        ("fg-hud", "fg-hud-baked-20fps", "HUD upečen, 20 fps",
+         [*_FG_BASE, "--ui", "baked", "--fixed-dt", "0.05", "--warmup", "10",
+          "--frames", "30"]),
+        ("fg-hud", "fg-hud-composite-20fps", "HUD nakon generiranja, 20 fps",
+         [*_FG_BASE, "--ui", "composite", "--fixed-dt", "0.05", "--warmup", "10",
+          "--frames", "30"]),
+    ]
+
+
+# M9. The measurement views are the ones of the fg groups, and none of them is
+# in the training set: scripts/ml_dataset.py captures other orbit angles and
+# other stretches of the procedural animation. Weights live in
+# captures/ml/weights/; blend-c8-c16.bin is the model the thesis reports, the
+# others are the size and data ablations.
+ML_WEIGHTS = REPO / "captures/ml/weights"
+ML_MAIN = ML_WEIGHTS / "blend-c8-c16.bin"
+if SPONZA.exists() and ML_MAIN.exists():
+    _ML = ["--fg-ml", str(ML_MAIN)]
+    _ML_VIEWS = [
+        ("1080p-q", "1080p Quality", _FG_BASE),
+        ("1080p-native", "1080p native",
+         [*FHD, "--scale", "1.0", "--upscaler", "fsr", *SPONZA_ARGS]),
+        ("1080p-p", "1080p Performance",
+         [*FHD, "--scale", "2.0", "--upscaler", "fsr", *SPONZA_ARGS]),
+        ("720p-q", "720p Quality",
+         ["--width", "1280", "--height", "720", "--scale", "1.5", "--upscaler", "fsr",
+          *SPONZA_ARGS]),
+        ("proc", "proceduralna scena", _FG_PROC),
+    ]
+    for _dt, _fps in (("0.0083333", "120"), ("0.0333333", "30"), ("0.05", "20")):
+        _step = float(_dt)
+        _warm = round(0.5 / _step)
+        _ML_VIEWS.append((f"speed-{_fps}", f"Quality, {_fps} fps",
+                          [*_FG_BASE, "--fixed-dt", _dt, "--warmup", str(_warm),
+                           "--frames", str(_warm + round(1.0 / _step))]))
+    for _tag, _desc, _args in _ML_VIEWS:
+        RUNS.append(("fg-ml", f"fg-ml-{_tag}-heur", f"{_desc}: heuristika", _args))
+        RUNS.append(("fg-ml", f"fg-ml-{_tag}-net", f"{_desc}: naucena mjesavina", [*_args, *_ML]))
+
+    for _path in sorted(ML_WEIGHTS.glob("*.bin")):
+        for _tag, _desc, _args in (("sponza", "Sponza Quality", _FG_BASE),
+                                   ("proc", "proceduralna scena", _FG_PROC)):
+            RUNS.append(("fg-ml-models", f"fg-ml-{_path.stem}-{_tag}", f"{_path.stem}, {_desc}",
+                         [*_args, "--fg-ml", str(_path)]))
+
 
 def run_one(binary, group, name, extra, frames, out_dir):
     csv_path = out_dir / f"{name}.csv"
@@ -496,7 +707,28 @@ def run_one(binary, group, name, extra, frames, out_dir):
         raise SystemExit(f"[run] {name} failed with exit code {proc.returncode}")
     if not csv_path.exists():
         raise SystemExit(f"[run] {name} produced no CSV at {csv_path}")
+    check_scene_time(csv_path, name, cmd)
     return csv_path
+
+
+def check_scene_time(csv_path, name, cmd):
+    """Fails a run whose scene clock stopped.
+
+    A paused run still writes a full CSV, and its numbers look plausible --
+    they just describe a frozen camera under a name that says otherwise. The
+    application ignores input while measuring, so this should never fire; it is
+    here because it once did, before that was true. The still-camera rows step
+    by 1e-7 s, below the CSV's six decimals, and are exempt.
+    """
+    dt = float(cmd[len(cmd) - 1 - cmd[::-1].index("--fixed-dt") + 1])
+    if dt < 1e-5:
+        return
+    with open(csv_path, newline="") as f:
+        times = [float(row["time_s"]) for row in csv.DictReader(f)]
+    stalls = sum(1 for a, b in zip(times, times[1:]) if b <= a)
+    if stalls:
+        raise SystemExit(f"[run] {name}: scene time did not advance on {stalls} frame(s) "
+                         f"-- the run was paused or received input; rerun it")
 
 
 # The aggregate is part of the key a result is stored under, so that one csv
@@ -518,6 +750,7 @@ def reduce_column(values, agg):
         return 100.0 * statistics.fmean(values)
     if agg == "median":
         return statistics.median(values)
+    if agg == "min":    return min(values)
     if agg == "p95":
         return percentile(values, 0.95)
     raise SystemExit(f"[agg] unknown aggregate '{agg}'")

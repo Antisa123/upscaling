@@ -55,7 +55,7 @@ Status: prijedlog plana, v1 (2026-09-11)
                      │ → interpolirani okvir na t-0.5       │
                      └──────────────────┬───────────────────┘
                                         ▼
-                        pacing queue → UI kompozicija → present
+                        UI kompozicija → pacing (nit prikaza) → present
                                         │
                      ┌──────────────────▼───────────────────┐
                      │ Modul F: mjerenje (metrike, timing)  │
@@ -147,6 +147,31 @@ Uz to:
 - **UI:** HUD se komponira **nakon** interpolacije (inače se razmazuje po ekranu); implementirati i debug način s "tear lines" trakama koje pokazuju prikazuje li se interpolirani okvir.
 - **Latencija:** frame generation povećava latenciju za ~1 render okvir — to se mora izmjeriti i pošteno prikazati, jer je to glavna kritika ove tehnologije.
 
+**Odstupanja implementacije od ovog nacrta (M7, `docs/FRAMEGEN.md`):**
+setup je jedan compute prolaz koji piše vrijednosti „prazno” u svih pet ciljeva
+scattera, a ne brojače; polja vektora i dubina međuokvira su u render
+razlučivosti (jedan izvorni piksel po texelu cilja), interpolacija u prikaznoj;
+x i y komponenta idu u dvije `r32ui` slike s istim prioritetom (16 bita
+prioriteta + 16-bitni float), kao u `FfxFrameInterpolation`; u polju toka
+nema dubine, pa je gornji bit „siguran blok” (pogreška podudaranja ispod praga)
+umjesto primarnog; piramida polja pri redukciji zadržava **najniži** prioritet
+(pozadinu), jer su rupe koje popunjava disokluzije; maske se računaju iz dubine
+međuokvira naspram dubinskih bufera t−1 i t. Prolazi 8–9 (inpainting slike) su M8.
+
+**Odstupanja implementacije (M8, `docs/PACING.md`, `docs/FRAMEGEN.md`):**
+UI se komponira na render niti prije predaje okvira (u oba okvira para), a ne
+nakon reda za prikaz — nit prikaza samo kopira i swapa. Prikaz ima vlastitu nit
+i GL kontekst koji dijeli teksture; predaja ide preko `glFinish`, jer
+`glFenceSync` na Mesi 26.2 ne radi. Oba okvira para crtaju se u back buffer
+odmah pri predaji („staging”), a u pravom trenutku ostaje samo swap: dva
+konteksta na istom GPU-u ne mogu preskočiti red poslova, pa je blit u trenutku
+prikaza čekao 3–6 ms iza render niti. Prolazi 8–9 rade nad pokrivenošću
+(alfa iz prolaza 7) umjesto nad posebnom maskom rupa; „čišćenje UI-ja” u
+prolazu 9 nije potrebno jer se UI nikad ne nalazi u ulazu generiranja, osim u
+namjerno lošem `--ui baked` načinu koji služi kao usporedba. Cijena igre
+simulira se sintetskim opterećenjem (`--load`), jer je Sponza lakša od praga
+isplativosti.
+
 ---
 
 ## 7. Modul E — Naučena (AI) komponenta
@@ -195,8 +220,8 @@ Cilj: dokazati razumijevanje razlike između analitičkog (FSR3) i naučenog (DL
 | M4 | Minimalni TAAU: reprojekcija + akumulacija + clamp | 2 tj | Slika stabilna, vidljiv dobitak PSNR-a nad bicubic | ✅ gotovo (+4,56 dB na mirnoj kameri, bolji SSIM na svim brzinama — `docs/TAAU.md`) |
 | M5 | Puni upscaler: dilate, depth clip, lockovi, luma piramida, reactive, RCAS | 3 tj | Sva 4 režima skaliranja rade, ablacije mjerljive | ✅ gotovo (+0,70 dB nad M4 na mirnoj kameri; luma piramida odgođena u M6 jer je ekspozicija fiksirana prije upscalera — `docs/FSR.md`) |
 | M6 | Optical flow: piramida, search/filter/upscale, detekcija promjene scene | 3 tj | Debug vizualizacija toka (HSV) izgleda ispravno | ✅ gotovo (EPE 2,8 px pri 120 fps i 0,0 px na mirnoj kameri naspram 23,0 px bez procjene; 0,56 ms na 1080p — `docs/OPTICALFLOW.md`) |
-| M7 | Frame generation jezgra: passevi 1–7 | 3 tj | Interpolirani okvir postoji i mjerljiv je naspram ground trutha | — |
-| M8 | Inpainting, UI kompozicija, frame pacing, latencija | 2 tj | FPS raste, frame time ravnomjeran, HUD čist | — |
+| M7 | Frame generation jezgra: passevi 1–7 | 3 tj | Interpolirani okvir postoji i mjerljiv je naspram ground trutha | ✅ gotovo (34,9 dB naspram 26,1 dB 50/50 blenda na 1080p Quality pri 60 fps; mirna kamera 40,14 dB = blend; 1,59 ms + 0,62 ms optical flow — `docs/FRAMEGEN.md`) |
+| M8 | Inpainting, UI kompozicija, frame pacing, latencija | 2 tj | FPS raste, frame time ravnomjeran, HUD čist | ✅ gotovo (uz opterećenje ×4–×24 prikazani FPS 1,36–1,58×, na neopterećenoj sceni bez dobitka; std intervala 0,5–1,1 ms naspram 3–10 ms bez pacinga; latencija +8–16 ms ≈ jedan render okvir; HUD 52,0 dB komponiran naspram 20,0 dB upečen; inpainting slike ±0,1 dB — `docs/PACING.md`) |
 | M9 | ML modul: dataset, trening, integracija, usporedba | 2 tj | Usporedna tablica heuristika vs. naučeni blend | — |
 | M10 | Mjerenja, grafovi, pisanje rada | 3 tj | Sva poglavlja + reproducibilni rezultati | — |
 
@@ -212,7 +237,7 @@ Ukupno ≈ 24 tjedna uz sekvencijalni rad. Kritični put je M1 → M4 → M7; M6
 |---|---|
 | Polaris nema brzu FP16 aritmetiku | Sve u FP32; FP16 put samo kao opcionalna optimizacija (FSR ionako ima FP32 fallback) |
 | Krivi motion vektori = sve izgleda pokvareno | Prvo debug vizualizacija MV-a i reprojekcije; ne kretati na M4 bez toga |
-| Frame pacing pod X11/Waylandom | Mjeriti stvarna vremena prikaza; benchmark s isključenim vsyncom, glatkoća mjerena zasebno |
+| Frame pacing pod X11/Waylandom | Mjeriti stvarna vremena prikaza; benchmark s isključenim vsyncom, glatkoća mjerena zasebno. **Ostvaren (M8):** mjeri se vrijeme swapa, ne fotona; vsync-off okvire iznad 100 Hz kompozitor ne prikaže, pa je dodan i vsync redak |
 | Atomici u MV field passu spori | Profilirati rano; alternativa je scatter preko storage buffera i sortiranje |
 | ML dio "pojede" vrijeme | Strogo ograničen na blend mrežu; ako klizne, ostaje poglavlje analize + offline rezultat |
 | Prevelik opseg | Svaki milestone daje upotrebljiv rezultat za rad i sam po sebi — rad je obranjiv i ako zadnja dva otpadnu |
@@ -242,6 +267,7 @@ ante-galic/
 │   ├── TAAU.md       # M4: minimalni temporalni upscaler
 │   ├── FSR.md        # M5: puni upscaler
 │   ├── OPTICALFLOW.md   # M6: procjena gibanja iz slike
+│   ├── FRAMEGEN.md   # M7: generiranje međuokvira
 │   └── thesis/       # tekst rada
 └── PLAN.md
 ```

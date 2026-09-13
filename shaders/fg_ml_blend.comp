@@ -1,0 +1,51 @@
+#version 460 core
+
+// M9, pass 12: the last layer of the network and the blend it predicts.
+//
+// The 1x1 layer from the upsampled decoder plus the level-0 skip to the seven
+// logits runs here rather than in ml_conv.comp: its output is only ever
+// consumed by the softmax right after it, so a separate pass would write a
+// display-resolution texture for nothing. The candidates are gathered by the
+// same function the feature pass used.
+//
+// HIDDEN_LAYERS  c0 / 4, rounded up
+
+#include "fg_ml_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 6) uniform sampler2DArray uSkip;     // enc0, display resolution
+layout(binding = 7) uniform sampler2DArray uDecoder;  // dec1, half resolution
+layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+
+layout(std430, binding = 0) readonly buffer Weights {
+    mat4 w[2 * HIDDEN_LAYERS];
+    vec4 b[2];
+};
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uDisplaySize))) return;
+
+    const MlSample s = mlGather(pos);
+    vec4 z0 = b[0];
+    vec4 z1 = b[1];
+    for (int i = 0; i < HIDDEN_LAYERS; ++i) {
+        const vec4 x = textureLod(uDecoder, vec3(s.uv, float(i)), 0.0) +
+                       texelFetch(uSkip, ivec3(pos, i), 0);
+        z0 += w[i] * x;
+        z1 += w[HIDDEN_LAYERS + i] * x;
+    }
+    const float logits[kMlCandidates] = float[](z0.x, z0.y, z0.z, z0.w, z1.x, z1.y, z1.z);
+
+    float top = logits[0];
+    for (int k = 1; k < kMlCandidates; ++k) top = max(top, logits[k]);
+    vec3 color = vec3(0.0);
+    float total = 0.0;
+    for (int k = 0; k < kMlCandidates; ++k) {
+        const float weight = exp(logits[k] - top);
+        color += weight * s.c[k];
+        total += weight;
+    }
+    imageStore(uOutput, pos, vec4(color / total, 1.0));
+}

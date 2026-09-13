@@ -1,0 +1,40 @@
+#version 460 core
+
+// M8, pass 9: fill what interpolation could not produce.
+//
+// Reads each pixel's coverage and, where it is short of 1, walks up the pass 8
+// pyramid to the finest level whose neighbourhood holds enough real samples,
+// un-premultiplies, and blends by coverage. A pixel pass 7 fully covered is
+// left untouched, bit for bit, so this pass can only change the frame where
+// the frame had nothing better to offer.
+//
+// The fill is smooth by construction -- it is an average over a region -- and
+// that is the right way for a hole to fail: a soft patch of the surrounding
+// surface reads as motion blur, a 50/50 double image reads as a bug.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uPyramid;
+layout(rgba16f, binding = 0) uniform image2D uImage;
+
+uniform ivec2 uDisplaySize;
+uniform int uLevels;
+// Mean coverage a pyramid texel needs before its colour is trusted. Below
+// this the average is dominated by a handful of pixels at the rim of the hole.
+uniform float uMinCoverage;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uDisplaySize))) return;
+    const vec4 v = imageLoad(uImage, pos);
+    if (v.a >= 0.999) return;
+
+    const vec2 uv = (vec2(pos) + 0.5) / vec2(uDisplaySize);
+    for (int l = 0; l < uLevels; ++l) {
+        const vec4 p = textureLod(uPyramid, uv, float(l));
+        if (p.a >= uMinCoverage) {
+            imageStore(uImage, pos, vec4(mix(p.rgb / p.a, v.rgb, v.a), v.a));
+            return;
+        }
+    }
+}

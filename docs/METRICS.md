@@ -41,6 +41,10 @@ motion vektore i retci koji mjere upscalere dijele istu tablicu.
 | `flow` | `--validate-flow --jitter` | točnost optical flowa po razlučivosti (M6) |
 | `flow-ablation` | `--validate-flow --jitter` | jedan redak po parametru procjenitelja |
 | `flow-speed` | `--validate-flow --jitter` | isti procjenitelj kroz četiri brzine kamere |
+| `fg` | `--validate-fg --jitter` | interpolirani okvir vs. pravi render na t−dt/2, po razlučivosti (M7) |
+| `fg-ablation` | `--validate-fg --jitter` | jedan redak po mehanizmu generiranja; Sponza i proceduralna scena |
+| `fg-speed` | `--validate-fg --jitter` | isti generator kroz pet brzina kamere; pri 30 i 20 fps i redak „kao M7” (M8) |
+| `fg-hud` | `--validate-fg --jitter` | HUD komponiran nakon generiranja naspram upečenog prije njega, cijeli okvir i samo HUD pravokutnik (M8) |
 
 Dvije ablacijske grupe za M5 nisu redundantne: dilatacija i lockovi štite
 povijest, a 60 fps orbita je skrati na približno jedan okvir. Mjereno samo
@@ -50,13 +54,25 @@ tamo, dilatacija bi ispala vrijedna 0.19 dB umjesto 2.50.
 ravni zapis s unijom stupaca (prazno gdje grupa nešto ne mjeri).
 
 Stupac tablice je `(stupac CSV-a, naslov, agregat)`, gdje je agregat `mean`,
-`median`, `p95` ili `pct` (udio po okviru izražen u postotku). Isti CSV stupac
+`median`, `p95`, `min` ili `pct` (udio po okviru izražen u postotku). Isti CSV stupac
 smije se pojaviti više puta s različitim agregatom — `flow` grupe to i rade, jer
 je raspodjela pogreške procjene gibanja teškorepa: šačica okvira u kojima slika
 klizi stotinama piksela određuje srednju vrijednost cijele snimke, pa bi ona
 sama opisivala te okvire, a ne ostalih sto.
 
-Flow grupe fiksiraju **prozor u vremenu scene**, ne u broju okvira: `flow-speed`
+S HUD-om na ekranu (`--ui composite|baked`) referenca je pravi međuokvir s
+HUD-om komponiranim preko njega, a HUD pravokutnik se izrezuje i ocjenjuje i
+zasebno (`psnr_hud`, `ssim_hud`): razmazani HUD je nekoliko stotina piksela od
+dva milijuna i srednju vrijednost cijelog okvira jedva pomakne. U validaciji je
+HUD statičan — brojač koji se mijenja između dva okvira bila bi legitimna
+razlika koju bi interpolacija onda morala „pogoditi”.
+
+`fg` grupe uz srednji PSNR prijavljuju i **najgori okvir** (`min`): kvar
+generiranja okvira je lokalan u vremenu — jedan okvir u kojem se velika
+disokluzija otvori odjednom — i srednja vrijednost preko sekunde ga razvuče
+do nevidljivosti, dok ga oko na ekranu vidi kao trzaj.
+
+Flow i fg grupe fiksiraju **prozor u vremenu scene**, ne u broju okvira: `flow-speed`
 računa `--warmup` i `--frames` iz vremenskog koraka (pola sekunde zagrijavanja,
 jedna sekunda mjerenja pri svakoj brzini). Fiksni broj okvira pri tri koraka
 mjeri tri različita komada putanje, a putanja nije ravnomjerno teška — to je
@@ -74,6 +90,13 @@ prikazalo lošijima.
 Svaka konfiguracija se pokreće sa `--scripted --fixed-dt 0.016667 --no-jitter`,
 dakle ista putanja kamere, isti vremenski korak i isti broj frameova. Sve što se
 razlikuje između redaka tablice mora biti u `RUNS`, ne u `COMMON`.
+
+Mjerni način (`--frames N`) **ne prima ulaz** s tipkovnice ni miša. Prozor i
+dalje dobiva fokus kao svaki drugi, a zalutala tipka nije bezopasna: razmaknica
+pauzira vrijeme scene, i svaki okvir nakon toga mjeri zamrznutu kameru pod
+imenom konfiguracije koje tvrdi suprotno. To se jednom tiho dogodilo u
+ablacijskom retku M7 (`time_s` zapeo na 0,3167 s od 19. okvira); stupac
+`time_s` u CSV-u je način da se takav run prepozna.
 
 ## Referenca je supersamplirana
 
@@ -129,6 +152,10 @@ ciljani pipeline nikad ne radi. Takvi passevi se imenuju prefiksom `ref: ` i
 `GpuTimer::totalMs()` ih preskače: pojavljuju se u ispisu po passevima, ali ne
 ulaze u cijenu okvira.
 
+Isto vrijedi za `--validate-fg`: render pravog međuokvira (`ref: GT midpoint`)
+i 50/50 blend istog para okvira (`ref: FG blend`) mjere se, ali nisu dio cijene
+generiranja.
+
 ## Što se mjeri
 
 | Stupac | Značenje |
@@ -147,6 +174,8 @@ ulaze u cijenu okvira.
 | `scene_change` | statistika udaljenosti histograma koju je presuda o rezu koristila |
 | `sc_max`, `sc_mean`, `sc_median` | sve tri statistike nad devet sekcija, svaki okvir |
 | `cut` | 1 ondje gdje je `--cut-every` forsirao rez (poravnato s dva okvira kašnjenja readbacka) |
+| `psnr_fg`, `ssim_fg` | interpolirani okvir vs. isti trenutak (t−dt/2) renderiran u punoj razlučivosti, supersampliran |
+| `psnr_blend`, `ssim_blend` | 50/50 blend istog para ulaznih okvira vs. ista referenca — donja granica koju generator mora nadmašiti |
 
 Razlika `psnr_reproj - psnr_direct` je test ispravnosti motion vektora: mora
 rasti s brzinom gibanja. Konfiguracije `motion-slow` / `motion-fast` postoje
@@ -197,9 +226,17 @@ ostaje poštena.
 | `scripts/check_gt.py` | provjera snimljene reference (`docs/GROUND_TRUTH.md`) |
 | `scripts/flow_cuts.py` | razdvajanje rezova od brzog gibanja, tri orbite × tri statistike |
 | `scripts/flow_debug.py` | M6 figura prihvaćanja: tok, referenca i pogreška podudaranja |
+| `scripts/fg_debug.py` | M7 figura: ulazni par, pravi međuokvir, interpolirani, blend, maske + karta pogreške |
+| `scripts/run_pacing.py` | M8: realtime mjerenja prikaza — FPS, raspodjela intervala, latencija, po opterećenju i načinu prikaza (`docs/PACING.md`) |
+| `scripts/make_font_atlas.py` | M8: rasterizira font HUD-a u `assets/ui_font.png` |
 
 Sve pišu u `captures/`, sve su bez vanjskih ovisnosti osim Pillowa ondje gdje
 sastavljaju sliku.
+
+`run_metrics.py` mjeri u **lockstep** načinu (fiksni `dt`, bit-identične
+snimke, kvaliteta i GPU cijena po prolazu); `run_pacing.py` u **realtime**
+načinu (`--run-seconds`, zidni sat), jer vrijeme prikaza i latencija postoje
+samo tamo. Dva načina se ne miješaju u istom retku.
 
 ## Implementacija
 

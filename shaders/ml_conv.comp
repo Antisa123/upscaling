@@ -1,0 +1,53 @@
+#version 460 core
+
+// M9: one convolution layer of the blend network (src/ml/blend_net.h).
+//
+// Channels live four to an RGBA16F layer of a texture array, and the weights
+// are mat4s, one per (output layer, tap, input layer): a 3x3 convolution from
+// 16 to 16 channels is 4 x 9 x 4 = 144 mat4 * vec4 products per pixel, which
+// is the shape GPUs without matrix units are still good at. The sizes arrive
+// as defines, so every loop has a constant bound.
+//
+//   IN_LAYERS, OUT_LAYERS  channels / 4, rounded up
+//   TAPS                   1 (1x1) or 9 (3x3)
+//   RELU                   0 or 1
+//
+// Input and output have the same size. Pooling and the upsampled skip sum run
+// as their own passes (ml_resample.comp): folded into the tap loop they cost a
+// filtered fetch per tap and input layer, and measured at 1080p that made the
+// pooled enc2 take 0.52 ms against 0.14 ms for enc3, the same convolution on
+// the same size reading texels directly. Padding replicates the edge by
+// clamping the tap coordinate, as the trainer does.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2DArray uInput;
+layout(rgba16f, binding = 0) uniform writeonly image2DArray uOutput;
+
+layout(std430, binding = 0) readonly buffer Weights {
+    mat4 w[OUT_LAYERS * TAPS * IN_LAYERS];
+    vec4 b[OUT_LAYERS];
+};
+
+uniform ivec2 uOutSize;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uOutSize))) return;
+
+    vec4 acc[OUT_LAYERS];
+    for (int o = 0; o < OUT_LAYERS; ++o) acc[o] = b[o];
+    for (int t = 0; t < TAPS; ++t) {
+#if TAPS == 9
+        const ivec2 q = clamp(pos + ivec2(t % 3 - 1, t / 3 - 1), ivec2(0), uOutSize - 1);
+#else
+        const ivec2 q = pos;
+#endif
+        for (int i = 0; i < IN_LAYERS; ++i) {
+            const vec4 x = texelFetch(uInput, ivec3(q, i), 0);
+            for (int o = 0; o < OUT_LAYERS; ++o) acc[o] += w[(o * TAPS + t) * IN_LAYERS + i] * x;
+        }
+    }
+    for (int o = 0; o < OUT_LAYERS; ++o)
+        imageStore(uOutput, ivec3(pos, o), RELU != 0 ? max(acc[o], vec4(0.0)) : acc[o]);
+}

@@ -266,3 +266,115 @@
 | 120 fps | 120 | 3.29 | 2.69 | 2.82 | 1.49 | 7.62 | 65.7 | 89.0 | 2.788 | 372 |
 | 60 fps | 60 | 3.48 | 2.71 | 11.63 | 3.66 | 36.81 | 56.9 | 80.2 | 2.794 | 370 |
 | 30 fps | 30 | 3.76 | 2.70 | 35.79 | 8.83 | 106.72 | 47.5 | 70.4 | 2.807 | 371 |
+
+## Generiranje okvira (M7): kvaliteta po razlucivosti i cijena
+
+| Konfiguracija | Frameovi | CPU ms | GPU ms | PSNR interp. (dB) | PSNR interp. min (dB) | SSIM interp. | PSNR blend (dB) | SSIM blend | GPU p95 (ms) | FPS (GPU) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1080p, render 1280x720, FSR | 104 | 16.57 | 4.64 | 35.00 | 27.56 | 0.9443 | 26.11 | 0.6775 | 4.764 | 215 |
+| 1080p native (FSR 1.0x) | 104 | 20.78 | 6.68 | 36.50 | 27.88 | 0.9628 | 26.14 | 0.6814 | 6.857 | 150 |
+| 1080p, render 960x540, FSR | 104 | 16.27 | 3.83 | 33.55 | 27.40 | 0.9166 | 26.16 | 0.6817 | 3.880 | 261 |
+| 1280x720, render 854x480, FSR | 104 | 9.57 | 2.33 | 33.95 | 27.43 | 0.9293 | 26.67 | 0.6982 | 2.349 | 428 |
+
+## Generiranje okvira: ablacije (Sponza, 60 fps orbita, Quality 1.5x)
+
+| Konfiguracija | Frameovi | CPU ms | GPU ms | PSNR interp. (dB) | PSNR interp. min (dB) | SSIM interp. | PSNR blend (dB) | SSIM blend | GPU p95 (ms) | FPS (GPU) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Sve zadano | 104 | 16.50 | 4.64 | 35.00 | 27.56 | 0.9443 | 26.11 | 0.6775 | 4.760 | 215 |
+| samo game vektori | 104 | 15.48 | 3.73 | 34.84 | 26.71 | 0.9447 | 26.11 | 0.6775 | 3.833 | 268 |
+| samo optical flow | 104 | 15.97 | 4.07 | 33.76 | 25.87 | 0.9263 | 26.11 | 0.6775 | 4.174 | 246 |
+| bez vektora (= blend) | 104 | 14.88 | 3.30 | 26.11 | 21.39 | 0.6775 | 26.11 | 0.6775 | 3.398 | 303 |
+| bez maski disokluzije | 104 | 16.27 | 4.45 | 34.93 | 27.38 | 0.9445 | 26.11 | 0.6775 | 4.553 | 225 |
+| bez dilatiranih vektora | 104 | 16.47 | 4.67 | 34.98 | 27.65 | 0.9444 | 26.11 | 0.6775 | 4.788 | 214 |
+| piramida: najblizi umjesto pozadine | 104 | 17.22 | 4.66 | 34.99 | 27.57 | 0.9443 | 26.11 | 0.6775 | 4.773 | 214 |
+| s bojom u prioritetu scattera | 104 | 16.75 | 5.02 | 35.00 | 27.56 | 0.9443 | 26.11 | 0.6775 | 5.134 | 199 |
+| tezina toka uz game vektor 1 | 104 | 16.38 | 4.64 | 34.85 | 27.60 | 0.9422 | 26.11 | 0.6775 | 4.763 | 216 |
+| tezina toka uz game vektor 0.5 | 104 | 16.45 | 4.64 | 35.00 | 27.56 | 0.9443 | 26.11 | 0.6775 | 4.755 | 215 |
+| tezina toka uz game vektor 0.25 | 104 | 17.10 | 4.64 | 35.05 | 27.43 | 0.9451 | 26.11 | 0.6775 | 4.759 | 215 |
+| tezina toka uz game vektor 0.1 | 104 | 16.36 | 4.65 | 35.02 | 27.22 | 0.9452 | 26.11 | 0.6775 | 4.763 | 215 |
+| 1 razina piramide polja | 104 | 16.26 | 4.49 | 34.71 | 27.99 | 0.9419 | 26.11 | 0.6775 | 4.596 | 223 |
+| 3 razina piramide polja | 104 | 16.45 | 4.62 | 34.84 | 27.67 | 0.9432 | 26.11 | 0.6775 | 4.756 | 216 |
+| 5 razina piramide polja | 104 | 16.84 | 4.63 | 34.94 | 27.52 | 0.9439 | 26.11 | 0.6775 | 4.755 | 216 |
+| 7 razina piramide polja | 104 | 16.39 | 4.64 | 35.00 | 27.56 | 0.9443 | 26.11 | 0.6775 | 4.770 | 216 |
+| ostrina slaganja boja 0 | 104 | 16.32 | 4.64 | 34.89 | 27.76 | 0.9433 | 26.11 | 0.6775 | 4.760 | 216 |
+| ostrina slaganja boja 6 | 104 | 16.43 | 4.64 | 34.98 | 27.71 | 0.9439 | 26.11 | 0.6775 | 4.767 | 215 |
+| ostrina slaganja boja 24 | 104 | 16.43 | 4.65 | 35.00 | 27.56 | 0.9443 | 26.11 | 0.6775 | 4.762 | 215 |
+| ostrina slaganja boja 96 | 104 | 16.53 | 4.64 | 35.02 | 27.62 | 0.9446 | 26.11 | 0.6775 | 4.766 | 215 |
+| tolerancija dubine 0.005 | 104 | 16.43 | 4.64 | 34.99 | 27.56 | 0.9442 | 26.11 | 0.6775 | 4.752 | 215 |
+| tolerancija dubine 0.02 | 104 | 16.44 | 4.65 | 35.00 | 27.56 | 0.9443 | 26.11 | 0.6775 | 4.766 | 215 |
+| tolerancija dubine 0.08 | 104 | 16.40 | 4.64 | 35.01 | 27.55 | 0.9443 | 26.11 | 0.6775 | 4.764 | 216 |
+| bez inpaintinga slike (prolazi 8-9) | 104 | 16.50 | 4.41 | 34.98 | 27.57 | 0.9442 | 26.11 | 0.6775 | 4.529 | 227 |
+| bez odbacivanja uzoraka izvan ekrana | 104 | 16.41 | 4.65 | 34.97 | 27.66 | 0.9439 | 26.11 | 0.6775 | 4.774 | 215 |
+| kao M7: bez inpaintinga i provjere granica | 104 | 16.26 | 4.41 | 34.94 | 27.56 | 0.9438 | 26.11 | 0.6775 | 4.528 | 227 |
+| prag pokrivenosti inpaintinga 0.1 | 104 | 16.31 | 4.65 | 35.00 | 27.55 | 0.9443 | 26.11 | 0.6775 | 4.775 | 215 |
+| prag pokrivenosti inpaintinga 0.3 | 104 | 17.15 | 4.65 | 35.00 | 27.56 | 0.9443 | 26.11 | 0.6775 | 4.768 | 215 |
+| prag pokrivenosti inpaintinga 0.6 | 104 | 16.45 | 4.65 | 34.99 | 27.61 | 0.9442 | 26.11 | 0.6775 | 4.773 | 215 |
+| proceduralna scena: Sve zadano | 104 | 11.65 | 3.77 | 34.06 | 33.74 | 0.9708 | 31.61 | 0.9475 | 3.791 | 265 |
+| proceduralna scena: samo game vektori | 104 | 10.53 | 2.86 | 33.68 | 33.34 | 0.9683 | 31.61 | 0.9475 | 2.880 | 349 |
+| proceduralna scena: samo optical flow | 104 | 11.10 | 3.26 | 33.53 | 32.79 | 0.9669 | 31.61 | 0.9475 | 3.251 | 307 |
+| proceduralna scena: bez vektora (= blend) | 104 | 10.04 | 2.48 | 31.61 | 31.13 | 0.9475 | 31.61 | 0.9475 | 2.497 | 403 |
+| proceduralna scena: bez maski disokluzije | 104 | 11.96 | 3.59 | 34.10 | 33.75 | 0.9710 | 31.61 | 0.9475 | 3.605 | 279 |
+| proceduralna scena: piramida: najblizi umjesto pozadine | 104 | 11.73 | 3.77 | 34.06 | 33.74 | 0.9708 | 31.61 | 0.9475 | 3.789 | 265 |
+| proceduralna scena: s bojom u prioritetu scattera | 104 | 12.08 | 4.14 | 34.06 | 33.74 | 0.9708 | 31.61 | 0.9475 | 4.152 | 241 |
+| proceduralna scena: bez inpaintinga slike (prolazi 8-9) | 104 | 11.49 | 3.54 | 34.07 | 33.73 | 0.9708 | 31.61 | 0.9475 | 3.558 | 282 |
+| proceduralna scena: bez odbacivanja uzoraka izvan ekrana | 104 | 11.71 | 3.77 | 34.06 | 33.73 | 0.9708 | 31.61 | 0.9475 | 3.790 | 265 |
+| proceduralna scena: kao M7: bez inpaintinga i provjere granica | 104 | 11.48 | 3.54 | 34.07 | 33.73 | 0.9708 | 31.61 | 0.9475 | 3.556 | 283 |
+| proceduralna scena: tezina toka uz game vektor 1 | 104 | 11.71 | 3.77 | 34.08 | 33.73 | 0.9710 | 31.61 | 0.9475 | 3.791 | 265 |
+| proceduralna scena: tezina toka uz game vektor 0.5 | 104 | 12.48 | 3.78 | 34.06 | 33.74 | 0.9708 | 31.61 | 0.9475 | 3.788 | 265 |
+| proceduralna scena: tezina toka uz game vektor 0.25 | 104 | 11.98 | 3.77 | 34.02 | 33.71 | 0.9704 | 31.61 | 0.9475 | 3.787 | 265 |
+| proceduralna scena: tezina toka uz game vektor 0.1 | 104 | 11.71 | 3.77 | 33.96 | 33.63 | 0.9699 | 31.61 | 0.9475 | 3.790 | 265 |
+
+## Generiranje okvira: kvaliteta u ovisnosti o brzini kamere (Quality 1.5x)
+
+| Konfiguracija | Frameovi | CPU ms | GPU ms | PSNR interp. (dB) | PSNR interp. min (dB) | SSIM interp. | PSNR blend (dB) | SSIM blend | GPU p95 (ms) | FPS (GPU) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| mirna kamera | 60 | 16.45 | 4.60 | 40.14 | 40.02 | 0.9832 | 40.14 | 0.9832 | 4.625 | 218 |
+| 120 fps | 120 | 16.29 | 4.64 | 35.94 | 31.23 | 0.9553 | 27.17 | 0.7489 | 4.747 | 215 |
+| 60 fps | 60 | 18.15 | 4.65 | 34.65 | 27.60 | 0.9473 | 25.56 | 0.6927 | 4.779 | 215 |
+| 30 fps | 30 | 17.07 | 4.66 | 32.85 | 24.11 | 0.9309 | 24.06 | 0.6461 | 4.768 | 215 |
+| 30 fps, kao M7 | 30 | 16.81 | 4.47 | 32.80 | 24.01 | 0.9299 | 24.06 | 0.6461 | 4.594 | 224 |
+| 20 fps | 20 | 16.95 | 4.61 | 30.95 | 20.23 | 0.9122 | 23.08 | 0.6186 | 4.852 | 217 |
+| 20 fps, kao M7 | 20 | 16.52 | 4.37 | 31.09 | 20.33 | 0.9112 | 23.08 | 0.6186 | 4.609 | 229 |
+
+## UI kompozicija (M8): HUD nakon generiranja okvira ili upečen prije njega
+
+| Konfiguracija | Frameovi | CPU ms | GPU ms | PSNR interp. (dB) | PSNR interp. min (dB) | SSIM interp. | PSNR blend (dB) | SSIM blend | PSNR HUD (dB) | SSIM HUD | PSNR HUD blend (dB) | GPU p95 (ms) | FPS (GPU) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| HUD nakon generiranja (kompozicija) | 104 | 19.51 | 4.74 | 35.04 | 27.57 | 0.9450 | 26.21 | 0.6869 | 52.01 | 0.9979 | 39.63 | 4.854 | 211 |
+| HUD upečen prije generiranja | 104 | 20.74 | 4.88 | 30.65 | 25.34 | 0.9390 | 26.21 | 0.6869 | 20.02 | 0.8811 | 39.64 | 4.975 | 205 |
+| HUD upečen, 20 fps | 20 | 19.62 | 4.82 | 26.77 | 18.42 | 0.8982 | 23.18 | 0.6275 | 16.43 | 0.7078 | 36.61 | 5.031 | 208 |
+| HUD nakon generiranja, 20 fps | 20 | 19.71 | 4.69 | 31.01 | 20.24 | 0.9143 | 23.18 | 0.6275 | 48.26 | 0.9900 | 36.61 | 4.909 | 213 |
+
+## Naucena mjesavina (M9) naspram heuristike, putanje izvan skupa za ucenje
+
+| Konfiguracija | Frameovi | CPU ms | GPU ms | PSNR interp. (dB) | PSNR interp. min (dB) | SSIM interp. | PSNR blend (dB) | SSIM blend | GPU p95 (ms) | FPS (GPU) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1080p Quality: heuristika | 104 | 18.72 | 4.71 | 35.00 | 27.56 | 0.9443 | 26.11 | 0.6775 | 5.054 | 212 |
+| 1080p Quality: naucena mjesavina | 104 | 24.32 | 8.91 | 35.08 | 28.57 | 0.9457 | 26.11 | 0.6775 | 9.164 | 112 |
+| 1080p native: heuristika | 104 | 21.60 | 6.69 | 36.50 | 27.88 | 0.9628 | 26.14 | 0.6814 | 6.893 | 150 |
+| 1080p native: naucena mjesavina | 104 | 28.83 | 11.11 | 36.65 | 28.86 | 0.9650 | 26.14 | 0.6814 | 12.016 | 90 |
+| 1080p Performance: heuristika | 104 | 20.03 | 3.86 | 33.55 | 27.40 | 0.9166 | 26.16 | 0.6817 | 3.880 | 259 |
+| 1080p Performance: naucena mjesavina | 104 | 23.22 | 7.96 | 33.62 | 28.22 | 0.9176 | 26.16 | 0.6817 | 8.199 | 126 |
+| 720p Quality: heuristika | 104 | 12.30 | 2.49 | 33.95 | 27.43 | 0.9293 | 26.67 | 0.6982 | 2.575 | 402 |
+| 720p Quality: naucena mjesavina | 104 | 14.59 | 4.40 | 33.97 | 28.12 | 0.9307 | 26.67 | 0.6982 | 6.038 | 227 |
+| proceduralna scena: heuristika | 104 | 14.05 | 3.77 | 34.06 | 33.74 | 0.9708 | 31.61 | 0.9475 | 3.795 | 265 |
+| proceduralna scena: naucena mjesavina | 104 | 18.55 | 7.96 | 34.22 | 33.83 | 0.9721 | 31.61 | 0.9475 | 7.979 | 126 |
+| Quality, 120 fps: heuristika | 120 | 19.57 | 4.67 | 35.94 | 31.23 | 0.9553 | 27.17 | 0.7489 | 4.881 | 214 |
+| Quality, 120 fps: naucena mjesavina | 120 | 24.62 | 8.91 | 36.03 | 31.08 | 0.9568 | 27.17 | 0.7489 | 8.957 | 112 |
+| Quality, 30 fps: heuristika | 30 | 18.89 | 4.67 | 32.85 | 24.11 | 0.9309 | 24.06 | 0.6461 | 4.813 | 214 |
+| Quality, 30 fps: naucena mjesavina | 30 | 23.80 | 8.96 | 32.69 | 23.97 | 0.9333 | 24.06 | 0.6461 | 9.158 | 112 |
+| Quality, 20 fps: heuristika | 20 | 18.91 | 4.73 | 30.95 | 20.23 | 0.9122 | 23.08 | 0.6186 | 6.213 | 211 |
+| Quality, 20 fps: naucena mjesavina | 20 | 23.44 | 8.88 | 30.57 | 18.85 | 0.9112 | 23.08 | 0.6186 | 9.196 | 113 |
+
+## Naucena mjesavina: velicina mreze i sastav skupa za ucenje
+
+| Konfiguracija | Frameovi | CPU ms | GPU ms | PSNR interp. (dB) | PSNR interp. min (dB) | SSIM interp. | PSNR blend (dB) | SSIM blend | GPU p95 (ms) | FPS (GPU) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| blend-c12-c24, Sponza Quality | 104 | 20.72 | 8.96 | 34.89 | 25.49 | 0.9449 | 26.11 | 0.6775 | 9.112 | 112 |
+| blend-c12-c24, proceduralna scena | 104 | 16.67 | 8.07 | 34.28 | 33.83 | 0.9724 | 31.61 | 0.9475 | 8.078 | 124 |
+| blend-c4-c8, Sponza Quality | 104 | 17.99 | 6.28 | 34.82 | 25.38 | 0.9444 | 26.11 | 0.6775 | 6.434 | 159 |
+| blend-c4-c8, proceduralna scena | 104 | 13.41 | 5.38 | 34.22 | 33.85 | 0.9720 | 31.61 | 0.9475 | 5.406 | 186 |
+| blend-c8-c16-sponza, Sponza Quality | 104 | 19.22 | 7.41 | 34.92 | 25.25 | 0.9452 | 26.11 | 0.6775 | 7.583 | 135 |
+| blend-c8-c16-sponza, proceduralna scena | 104 | 14.46 | 6.52 | 33.89 | 33.33 | 0.9698 | 31.61 | 0.9475 | 6.535 | 153 |
+| blend-c8-c16, Sponza Quality | 104 | 19.16 | 7.42 | 35.08 | 28.57 | 0.9457 | 26.11 | 0.6775 | 7.593 | 135 |
+| blend-c8-c16, proceduralna scena | 104 | 14.42 | 6.52 | 34.22 | 33.83 | 0.9721 | 31.61 | 0.9475 | 6.538 | 153 |

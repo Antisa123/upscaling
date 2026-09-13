@@ -1,0 +1,15 @@
+[gl] AMD Radeon RX 580 Series (radeonsi, polaris10, ACO, DRM 3.64, 7.1.13-hardened1-2-hardened) | 4.6 (Core Profile) Mesa 26.2.2-arch1.1 | GLSL 4.60
+[gltf] /home/matthew/Documents/Workspace/ante-galic/assets/sponza/Sponza.gltf: 103 meshes, 103 instances, 25 textures
+[app] keys: 1-9 debug views | 0 interpolated frame | J jitter | P scripted path | V vsync | F1-F5 scaling mode | SPACE pause | F12 screenshot | ESC quit
+[app]       G frame generation | Y pacing | H HUD | T tear lines | [ ] synthetic load
+[gpu] G-buffer                   0.745 ms (last   0.750)
+[gpu] Synthetic load            15.005 ms (last  13.851)
+[gpu] load G-buffer              0.577 ms (last   0.576)
+[gpu] Tonemap                    0.084 ms (last   0.083)
+[gpu] FSR dilate                 0.245 ms (last   0.246)
+[gpu] FSR locks                  0.059 ms (last   0.058)
+[gpu] FSR accumulate             0.685 ms (last   0.687)
+[gpu] Present                    0.129 ms (last   0.129)
+[gpu] TOTAL                     16.952 ms (last  15.804)
+[present] 435 presents (435 real, 0 generated)  interval mean 17.668 ms (56.6 fps)  std 2.037 ms  p99 23.775 ms
+[present] latency sample -> real frame 17.68 ms

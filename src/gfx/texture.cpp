@@ -18,7 +18,7 @@ void Texture2D::create(int w, int h, GLenum internalFormat, int mipLevels,
     glTextureParameteri(id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTextureParameteri(id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     // Integer formats cannot be linearly filtered.
-    const bool isInteger = internalFormat == GL_R32UI || internalFormat == GL_RG32UI ||
+    const bool isInteger = internalFormat == GL_R32UI || internalFormat == GL_RG32UI || internalFormat == GL_R8UI ||
                            internalFormat == GL_RGBA32UI || internalFormat == GL_R32I;
     const GLenum filter = isInteger ? GL_NEAREST : GL_LINEAR;
     glTextureParameteri(id, GL_TEXTURE_MAG_FILTER, filter);
@@ -55,6 +55,29 @@ void Texture2D::clearUint(unsigned value) const {
                           : (format == GL_RG32UI)                    ? GL_RG_INTEGER
                                                                      : GL_RGBA_INTEGER;
     for (int l = 0; l < levels; ++l) glClearTexImage(id, l, layout, GL_UNSIGNED_INT, v);
+}
+
+void Texture2DArray::ensure(int w, int h, int layerCount, GLenum internalFormat,
+                            const std::string& label) {
+    if (id && width == w && height == h && layers == layerCount && format == internalFormat) return;
+    destroy();
+    width = w;
+    height = h;
+    layers = layerCount;
+    format = internalFormat;
+    glCreateTextures(GL_TEXTURE_2D_ARRAY, 1, &id);
+    glTextureStorage3D(id, 1, internalFormat, w, h, layerCount);
+    glTextureParameteri(id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTextureParameteri(id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTextureParameteri(id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTextureParameteri(id, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    objectLabel(GL_TEXTURE, id, label);
+}
+
+void Texture2DArray::destroy() {
+    if (id) glDeleteTextures(1, &id);
+    id = 0;
+    width = height = layers = 0;
 }
 
 void PingPong::ensure(int w, int h, GLenum fmt, const std::string& label) {

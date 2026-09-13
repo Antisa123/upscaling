@@ -1,0 +1,151 @@
+training data
+  data/proc-t10-p1.0-60.bin: 240 patches
+  data/proc-t25-p3.0-30.bin: 160 patches
+  data/proc-t40-p3.0-60.bin: 240 patches
+  data/sponza-r2-p3.0-60.bin: 240 patches
+  data/sponza-r3-p2.5-60-perf.bin: 240 patches
+  data/sponza-r3-p2.5-60.bin: 240 patches
+  data/sponza-r3-p3.0-30.bin: 160 patches
+  data/sponza-r3-p3.5-120.bin: 360 patches
+  data/sponza-r4-p2.0-30.bin: 160 patches
+  data/sponza-r5-p1.0-60.bin: 240 patches
+  data/sponza-r5-p2.0-60-native.bin: 240 patches
+  data/sponza-r5-p2.5-60.bin: 240 patches
+  data/sponza-r5-p3.5-20.bin: 120 patches
+validation data
+  data/val-proc-t80-p4.0-60.bin: 240 patches
+  data/val-sponza-r4-p1.3-30.bin: 160 patches
+network c0 8 c1 16, 7199 parameters; 2880 training patches of 96 px, batch 16, 12000 steps
+step    100  lr 0.00067  loss 0.01120  5 s
+step    200  lr 0.00133  loss 0.01126  9 s
+step    300  lr 0.00200  loss 0.01108  12 s
+step    400  lr 0.00200  loss 0.01092  16 s
+step    500  lr 0.00200  loss 0.01121  20 s
+step    600  lr 0.00200  loss 0.01102  24 s
+step    700  lr 0.00199  loss 0.01079  27 s
+step    800  lr 0.00199  loss 0.01073  31 s
+step    900  lr 0.00199  loss 0.01061  35 s
+step   1000  lr 0.00198  loss 0.01049  39 s
+  [val   1000] loss 0.00692   network  33.95 dB   heuristic  33.85 dB   gain +0.10 dB
+step   1100  lr 0.00198  loss 0.00979  43 s
+step   1200  lr 0.00197  loss 0.00956  47 s
+step   1300  lr 0.00196  loss 0.00948  51 s
+step   1400  lr 0.00196  loss 0.00947  56 s
+step   1500  lr 0.00195  loss 0.00952  60 s
+step   1600  lr 0.00194  loss 0.00965  64 s
+step   1700  lr 0.00193  loss 0.00987  67 s
+step   1800  lr 0.00192  loss 0.01001  71 s
+step   1900  lr 0.00191  loss 0.01006  75 s
+step   2000  lr 0.00190  loss 0.01017  79 s
+  [val   2000] loss 0.00714   network  33.69 dB   heuristic  33.85 dB   gain -0.16 dB
+step   2100  lr 0.00189  loss 0.01009  83 s
+step   2200  lr 0.00188  loss 0.00951  87 s
+step   2300  lr 0.00186  loss 0.00966  91 s
+step   2400  lr 0.00185  loss 0.00962  95 s
+step   2500  lr 0.00183  loss 0.00985  99 s
+step   2600  lr 0.00182  loss 0.00991  103 s
+step   2700  lr 0.00180  loss 0.01002  108 s
+step   2800  lr 0.00179  loss 0.00998  112 s
+step   2900  lr 0.00177  loss 0.00992  115 s
+step   3000  lr 0.00175  loss 0.00995  119 s
+  [val   3000] loss 0.00690   network  33.94 dB   heuristic  33.85 dB   gain +0.09 dB
+step   3100  lr 0.00174  loss 0.01050  123 s
+step   3200  lr 0.00172  loss 0.01029  127 s
+step   3300  lr 0.00170  loss 0.01031  130 s
+step   3400  lr 0.00168  loss 0.01013  134 s
+step   3500  lr 0.00166  loss 0.01009  138 s
+step   3600  lr 0.00164  loss 0.01006  141 s
+step   3700  lr 0.00162  loss 0.01029  145 s
+step   3800  lr 0.00160  loss 0.01032  149 s
+step   3900  lr 0.00158  loss 0.01032  152 s
+step   4000  lr 0.00155  loss 0.01023  156 s
+  [val   4000] loss 0.00665   network  34.04 dB   heuristic  33.85 dB   gain +0.19 dB
+step   4100  lr 0.00153  loss 0.00997  160 s
+step   4200  lr 0.00151  loss 0.01012  164 s
+step   4300  lr 0.00149  loss 0.01019  169 s
+step   4400  lr 0.00146  loss 0.01047  173 s
+step   4500  lr 0.00144  loss 0.01047  178 s
+step   4600  lr 0.00142  loss 0.01042  182 s
+step   4700  lr 0.00139  loss 0.01034  186 s
+step   4800  lr 0.00137  loss 0.01025  190 s
+step   4900  lr 0.00134  loss 0.01020  194 s
+step   5000  lr 0.00132  loss 0.01013  197 s
+  [val   5000] loss 0.00672   network  33.96 dB   heuristic  33.85 dB   gain +0.11 dB
+step   5100  lr 0.00129  loss 0.01041  201 s
+step   5200  lr 0.00127  loss 0.01020  205 s
+step   5300  lr 0.00124  loss 0.01001  209 s
+step   5400  lr 0.00122  loss 0.00997  213 s
+step   5500  lr 0.00119  loss 0.01019  217 s
+step   5600  lr 0.00116  loss 0.01011  221 s
+step   5700  lr 0.00114  loss 0.00999  225 s
+step   5800  lr 0.00111  loss 0.00993  229 s
+step   5900  lr 0.00109  loss 0.00986  233 s
+step   6000  lr 0.00106  loss 0.00980  237 s
+  [val   6000] loss 0.00661   network  34.09 dB   heuristic  33.85 dB   gain +0.24 dB
+step   6100  lr 0.00103  loss 0.00905  241 s
+step   6200  lr 0.00101  loss 0.00903  244 s
+step   6300  lr 0.00098  loss 0.00919  248 s
+step   6400  lr 0.00095  loss 0.00920  252 s
+step   6500  lr 0.00093  loss 0.00918  255 s
+step   6600  lr 0.00090  loss 0.00928  259 s
+step   6700  lr 0.00088  loss 0.00926  263 s
+step   6800  lr 0.00085  loss 0.00926  266 s
+step   6900  lr 0.00082  loss 0.00928  270 s
+step   7000  lr 0.00080  loss 0.00930  274 s
+  [val   7000] loss 0.00658   network  34.09 dB   heuristic  33.85 dB   gain +0.24 dB
+step   7100  lr 0.00077  loss 0.00932  278 s
+step   7200  lr 0.00075  loss 0.00935  281 s
+step   7300  lr 0.00072  loss 0.00945  285 s
+step   7400  lr 0.00070  loss 0.00947  288 s
+step   7500  lr 0.00067  loss 0.00948  292 s
+step   7600  lr 0.00065  loss 0.00942  296 s
+step   7700  lr 0.00062  loss 0.00937  299 s
+step   7800  lr 0.00060  loss 0.00934  303 s
+step   7900  lr 0.00058  loss 0.00938  307 s
+step   8000  lr 0.00055  loss 0.00930  310 s
+  [val   8000] loss 0.00658   network  34.11 dB   heuristic  33.85 dB   gain +0.26 dB
+step   8100  lr 0.00053  loss 0.00870  314 s
+step   8200  lr 0.00051  loss 0.00904  318 s
+step   8300  lr 0.00049  loss 0.00920  322 s
+step   8400  lr 0.00046  loss 0.00932  326 s
+step   8500  lr 0.00044  loss 0.00951  329 s
+step   8600  lr 0.00042  loss 0.00946  333 s
+step   8700  lr 0.00040  loss 0.00941  337 s
+step   8800  lr 0.00038  loss 0.00934  341 s
+step   8900  lr 0.00036  loss 0.00929  345 s
+step   9000  lr 0.00034  loss 0.00926  349 s
+  [val   9000] loss 0.00656   network  34.12 dB   heuristic  33.85 dB   gain +0.27 dB
+step   9100  lr 0.00032  loss 0.00869  353 s
+step   9200  lr 0.00030  loss 0.00911  356 s
+step   9300  lr 0.00029  loss 0.00902  360 s
+step   9400  lr 0.00027  loss 0.00915  364 s
+step   9500  lr 0.00025  loss 0.00918  367 s
+step   9600  lr 0.00024  loss 0.00916  371 s
+step   9700  lr 0.00022  loss 0.00913  374 s
+step   9800  lr 0.00021  loss 0.00912  378 s
+step   9900  lr 0.00019  loss 0.00903  382 s
+step  10000  lr 0.00018  loss 0.00901  385 s
+  [val  10000] loss 0.00656   network  34.11 dB   heuristic  33.85 dB   gain +0.26 dB
+step  10100  lr 0.00016  loss 0.00904  389 s
+step  10200  lr 0.00015  loss 0.00899  393 s
+step  10300  lr 0.00014  loss 0.00897  397 s
+step  10400  lr 0.00013  loss 0.00906  400 s
+step  10500  lr 0.00012  loss 0.00910  404 s
+step  10600  lr 0.00011  loss 0.00905  408 s
+step  10700  lr 0.00010  loss 0.00903  411 s
+step  10800  lr 0.00009  loss 0.00906  415 s
+step  10900  lr 0.00008  loss 0.00903  419 s
+step  11000  lr 0.00008  loss 0.00907  422 s
+  [val  11000] loss 0.00655   network  34.12 dB   heuristic  33.85 dB   gain +0.27 dB
+step  11100  lr 0.00007  loss 0.00854  426 s
+step  11200  lr 0.00006  loss 0.00906  431 s
+step  11300  lr 0.00006  loss 0.00895  435 s
+step  11400  lr 0.00005  loss 0.00900  439 s
+step  11500  lr 0.00005  loss 0.00891  443 s
+step  11600  lr 0.00005  loss 0.00881  447 s
+step  11700  lr 0.00004  loss 0.00877  451 s
+step  11800  lr 0.00004  loss 0.00884  454 s
+step  11900  lr 0.00004  loss 0.00885  458 s
+step  12000  lr 0.00004  loss 0.00885  462 s
+  [val  12000] loss 0.00656   network  34.12 dB   heuristic  33.85 dB   gain +0.27 dB
+saved weights/blend-c8-c16.bin (best validation step)

@@ -12,11 +12,21 @@
 //
 // So: two masks, one per direction, each answering "was this surface visible
 // at that instant". The evidence is depth, exactly as in the upscaler's
-// disocclusion test. Take the reconstructed depth of the interpolated frame,
-// look up the depth buffer of the frame being warped from at the position the
-// vector points to, and compare. Agreement means the surface was there;
-// disagreement means something else was, and that direction's colour belongs
-// to a different object.
+// disocclusion test, and the one thing that has to be right is *which* depth
+// each buffer is compared against -- a camera that moves changes every
+// surface's distance between t-1 and t, so a single number cannot be the
+// expected value for both:
+//
+//   * Towards t. The depth field holds, for the surface that won each texel,
+//     its distance *at t* (pass 2 scatters this frame's depth). The current
+//     depth buffer at the far end of the vector must show that same distance.
+//   * Towards t-1. The G-buffer's second depth channel stores, for every pixel
+//     of the current frame, the distance its surface had last frame. Read at
+//     the pixel the vector leads back to in the current frame, that is the
+//     distance the previous depth buffer must show.
+//
+// Agreement means the surface was there; disagreement means something else
+// was, and that direction's colour belongs to a different object.
 //
 //   x = occlusion with respect to the previous frame (1 = do not warp from it)
 //   y = occlusion with respect to the current frame
@@ -79,20 +89,41 @@ void main() {
         return;
     }
 
-    const float midZ = uintBitsToFloat(packedDepth);
+    // Distance at t of the surface that owns this texel.
+    const float curZ = uintBitsToFloat(packedDepth);
+    // No geometry: the G-buffer clears distance to 1e6, and the upscaler's
+    // dilated buffer is half-float, where that clear value is +inf. Either way
+    // there is no surface to test, and inf / inf would otherwise make both
+    // masks NaN -- which the clamp resolves to "occluded", turning every sky
+    // pixel into a pixel that trusts neither frame.
+    if (isinf(curZ) || curZ > 6.0e4) {
+        imageStore(uOutput, pos, vec4(0.0));
+        return;
+    }
     const vec2 uv = (vec2(pos) + 0.5) / vec2(uFieldSize);
     const vec2 mv = field.xy;
 
     const vec2 prevUV = uv + 0.5 * mv;
     const vec2 curUV = uv - 0.5 * mv;
-
-    float occPrev = 1.0;
-    if (all(greaterThanEqual(prevUV, vec2(0.0))) && all(lessThanEqual(prevUV, vec2(1.0))))
-        occPrev = occlusion(midZ, nearestAndSpread(uPrevDepthInfo, prevUV), uDepthTolerance);
+    const bool curOnScreen =
+        all(greaterThanEqual(curUV, vec2(0.0))) && all(lessThanEqual(curUV, vec2(1.0)));
 
     float occCur = 1.0;
-    if (all(greaterThanEqual(curUV, vec2(0.0))) && all(lessThanEqual(curUV, vec2(1.0))))
-        occCur = occlusion(midZ, nearestAndSpread(uDepthInfo, curUV), uDepthTolerance);
+    if (curOnScreen)
+        occCur = occlusion(curZ, nearestAndSpread(uDepthInfo, curUV), uDepthTolerance);
+
+    float occPrev = 1.0;
+    if (curOnScreen &&
+        all(greaterThanEqual(prevUV, vec2(0.0))) && all(lessThanEqual(prevUV, vec2(1.0)))) {
+        // Where the surface at the current-frame end of the vector was last
+        // frame. If that pixel belongs to an occluder instead (occCur high),
+        // this is the occluder's history and the test says whether the
+        // occluder was there at t-1 -- which it usually was, so the previous
+        // frame is kept, and that is the only direction left anyway.
+        const float expectedPrevZ = textureLod(uDepthInfo, curUV, 0.0).y;
+        occPrev = occlusion(expectedPrevZ, nearestAndSpread(uPrevDepthInfo, prevUV),
+                            uDepthTolerance);
+    }
 
     imageStore(uOutput, pos, vec4(occPrev, occCur, 0.0, 0.0));
 }

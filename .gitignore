@@ -31,3 +31,7 @@ __pycache__/
 /captures/**/*.jpg
 /captures/**/*.jpeg
 /captures/**/*.ppm
+
+# M9: skup za učenje mreže (desetci patcheva po okviru, ~200 MB po putanji).
+# scripts/ml_dataset.py ga ponovno snima; manifest s popisom putanja ostaje.
+/captures/ml/data/*.bin

@@ -1,0 +1,37 @@
+#version 460 core
+
+// M9: the blend network's two resampling steps, each a pass of its own so the
+// convolutions after them read plain texels (see ml_conv.comp).
+//
+//   LAYERS  channels / 4, rounded up
+//   MODE 1  2x2 mean of uInput, which is twice the output size
+//   MODE 2  bilinear 2x upsample of uInput (half the output size), half-texel
+//           centres and clamped edges -- one GL_LINEAR fetch -- plus uSkip at
+//           the output size: the U-Net skip connection
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2DArray uInput;
+layout(binding = 1) uniform sampler2DArray uSkip;
+layout(rgba16f, binding = 0) uniform writeonly image2DArray uOutput;
+
+uniform ivec2 uOutSize;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uOutSize))) return;
+
+    for (int l = 0; l < LAYERS; ++l) {
+#if MODE == 1
+        const ivec2 s = pos * 2;
+        const vec4 v = 0.25 * (texelFetch(uInput, ivec3(s, l), 0) +
+                               texelFetch(uInput, ivec3(s + ivec2(1, 0), l), 0) +
+                               texelFetch(uInput, ivec3(s + ivec2(0, 1), l), 0) +
+                               texelFetch(uInput, ivec3(s + ivec2(1, 1), l), 0));
+#else
+        const vec4 v = textureLod(uInput, vec3((vec2(pos) + 0.5) / vec2(uOutSize), float(l)), 0.0) +
+                       texelFetch(uSkip, ivec3(pos, l), 0);
+#endif
+        imageStore(uOutput, ivec3(pos, l), v);
+    }
+}

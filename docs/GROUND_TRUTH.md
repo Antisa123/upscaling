@@ -69,3 +69,7 @@ među-okvira — **28,85 dB je donja granica koju generiranje okvira (M7) mora
 nadmašiti** da bi uopće imalo smisla. Blend je usporediv s reprojekcijom jer i
 jedno i drugo koristi isti par okvira; razlika je što blend ne zna ništa o
 gibanju.
+
+M7 tu granicu prelazi u svakoj izmjerenoj konfiguraciji — 34,94 dB na 1080p
+Quality pri 60 fps, naspram 26,11 dB in-engine blenda istog para; vidi
+`docs/FRAMEGEN.md`.

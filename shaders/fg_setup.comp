@@ -1,0 +1,33 @@
+#version 460 core
+
+// M7, pass 1: setup.
+//
+// The five scatter targets are accumulators written by atomics, so each frame
+// has to start from a value that means "nothing here": priority 0 is
+// impossible for a real candidate, and 0xFFFFFFFF is farther than any depth.
+// That is what lets every later pass tell an empty texel from a real sample
+// without carrying a separate coverage image.
+//
+// One compute pass rather than five glClearTexImage calls, for a measured
+// reason: the driver's clear path costs 0.33 ms at 720p here, and a single
+// dispatch that writes all five texels of a column costs a fraction of that.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(r32ui, binding = 0) uniform writeonly uimage2D uDepthField;
+layout(r32ui, binding = 1) uniform writeonly uimage2D uGameX;
+layout(r32ui, binding = 2) uniform writeonly uimage2D uGameY;
+layout(r32ui, binding = 3) uniform writeonly uimage2D uFlowX;
+layout(r32ui, binding = 4) uniform writeonly uimage2D uFlowY;
+
+uniform ivec2 uFieldSize;
+
+void main() {
+    const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, uFieldSize))) return;
+    imageStore(uDepthField, pos, uvec4(0xFFFFFFFFu));
+    imageStore(uGameX, pos, uvec4(0u));
+    imageStore(uGameY, pos, uvec4(0u));
+    imageStore(uFlowX, pos, uvec4(0u));
+    imageStore(uFlowY, pos, uvec4(0u));
+}

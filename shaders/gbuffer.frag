@@ -116,6 +116,18 @@ void main() {
     // UV-space motion vector, current -> previous: previousUV = uv + velocity.
     vec2 curUV = (vCurClip.xy / vCurClip.w) * 0.5 + 0.5;
     vec2 prevUV = (vPrevClip.xy / vPrevClip.w) * 0.5 + 0.5;
+    // The division is only a projection while the point was in front of last
+    // frame's eye plane. On or behind it -- after a cut, or on the first frame,
+    // where the previous camera is not a neighbour of this one -- there was no
+    // screen position at all, and a w through zero writes inf, or 0/0 on the
+    // y = 0 floor, into the buffer; the temporal passes then spread that one
+    // texel through their history until the whole frame is NaN. A guard band
+    // of 1e4 half-screens rejects those and the near-zero w that would overflow
+    // RG16F, while leaving every real projection alone, including points just
+    // inside the near plane, which a camera passing through geometry produces
+    // on ordinary frames. Rejected points go clearly off-screen: every consumer
+    // already reads that as "no history here".
+    if (!all(lessThan(abs(vPrevClip.xy), vec2(1e4 * vPrevClip.w)))) prevUV = curUV - 2.0;
     oVelocity = prevUV - curUV;
     oDepthInfo = vec2(vCurClip.w, vPrevClip.w);
 

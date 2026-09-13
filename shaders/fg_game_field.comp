@@ -50,6 +50,11 @@ uniform int uHasDilated;
 // test uses, and for the same reason: perspective makes an absolute threshold
 // meaningless.
 uniform float uDepthTolerance;
+// 0 drops the colour term from the priority. It is the only part of the
+// scatter that reads the display-resolution images -- two filtered fetches per
+// source pixel, at a random position -- and so most of the pass's cost; the
+// flag exists to measure what those five bits buy.
+uniform int uColorPriority;
 
 void main() {
     const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
@@ -80,10 +85,12 @@ void main() {
     // function of distance produces the same one.
     const uint depthBits = uint(clamp(1023.0 / (1.0 + z), 0.0, 1023.0));
 
-    const vec2 prevUV = uv + mv;
-    const float diff =
-        fgColorDistance(texture(uCurrent, uv).rgb, texture(uPrevious, prevUV).rgb);
-    const uint colorBits = uint(clamp(31.0 * (1.0 - 4.0 * diff), 0.0, 31.0));
+    uint colorBits = 0u;
+    if (uColorPriority != 0) {
+        const float diff =
+            fgColorDistance(texture(uCurrent, uv).rgb, texture(uPrevious, uv + mv).rgb);
+        colorBits = uint(clamp(31.0 * (1.0 - 4.0 * diff), 0.0, 31.0));
+    }
 
     const uint priority = max((primary << 15) | (depthBits << 5) | colorBits, 1u);
     imageAtomicMax(uFieldX, target, fgPack(priority, mv.x));

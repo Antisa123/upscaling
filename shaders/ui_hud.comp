@@ -1,0 +1,83 @@
+#version 460 core
+
+// M8: the HUD layer.
+//
+// Rasterised into its own display-resolution image, apart from the frame,
+// because where it joins the frame is the whole question. Composed over the
+// finished frames -- real and generated alike -- it stays crisp. Baked into
+// the frames the generator interpolates between, it is just more pixels, and
+// gets warped by the motion vectors of whatever scenery is behind it. Both
+// orders are implemented (--ui composite / baked) so the difference is a
+// number, not a screenshot.
+//
+// Only the panel rectangle is dispatched; the rest of the layer stays clear.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D uFont;    // 16 x 6 cells, ASCII 32..127, coverage in alpha
+layout(binding = 1) uniform usampler2D uText;   // one character code per cell
+layout(binding = 2) uniform sampler2D uGraph;   // R32F, present intervals in ms, oldest first
+layout(rgba8, binding = 0) uniform writeonly image2D uLayer;
+
+uniform ivec2 uDisplaySize;
+uniform ivec4 uRect;       // panel: x, y from the top-left corner, width, height
+uniform ivec2 uCell;       // glyph cell, pixels
+uniform ivec2 uTextGrid;   // columns, rows in use
+uniform int uPadding;
+uniform int uGraphCount;   // samples in the graph texture; 0 hides the graph
+uniform int uGraphHeight;
+uniform float uGraphScale;   // ms at the top of the graph
+uniform float uGraphTarget;  // ms drawn as the reference line
+
+float glyph(ivec2 cellOrigin, ivec2 p) {
+    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, uCell))) return 0.0;
+    return texelFetch(uFont, cellOrigin + p, 0).a;
+}
+
+void main() {
+    const ivec2 local = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(local, uRect.zw))) return;
+    // Laid out top-down like text, stored bottom-up like every GL image.
+    const ivec2 pixel = ivec2(uRect.x + local.x, uDisplaySize.y - 1 - (uRect.y + local.y));
+    if (any(lessThan(pixel, ivec2(0))) || any(greaterThanEqual(pixel, uDisplaySize))) return;
+
+    vec4 c = vec4(0.0, 0.0, 0.0, 0.6);
+    const ivec2 inner = local - ivec2(uPadding);
+    const ivec2 textSize = uTextGrid * uCell;
+
+    if (all(greaterThanEqual(inner, ivec2(0))) && all(lessThan(inner, textSize))) {
+        const ivec2 cell = inner / uCell;
+        const uint code = texelFetch(uText, ivec2(cell.x, cell.y), 0).r;
+        if (code > 32u && code < 128u) {
+            const int index = int(code) - 32;
+            const ivec2 origin = ivec2(index % 16, index / 16) * uCell;
+            const ivec2 p = inner - cell * uCell;
+            // A one-pixel drop shadow keeps the text readable over the bright
+            // parts of the scene the panel's tint does not darken enough.
+            const float shadow = glyph(origin, p - ivec2(1));
+            const float text = glyph(origin, p);
+            c = mix(c, vec4(0.0, 0.0, 0.0, 1.0), shadow);
+            c = mix(c, vec4(1.0), text);
+        }
+    }
+
+    const int graphTop = uPadding + textSize.y + uPadding;
+    const int gy = local.y - graphTop;
+    const int graphWidth = uRect.z - 2 * uPadding;
+    if (uGraphCount > 0 && gy >= 0 && gy < uGraphHeight && inner.x >= 0 && inner.x < graphWidth) {
+        c = vec4(0.1, 0.1, 0.1, 0.75);
+        const int sampleIndex = inner.x * uGraphCount / graphWidth;
+        const float ms = texelFetch(uGraph, ivec2(sampleIndex, 0), 0).r;
+        const int rowFromBottom = uGraphHeight - 1 - gy;
+        const float barHeight = clamp(ms / uGraphScale, 0.0, 1.0) * float(uGraphHeight);
+        if (float(rowFromBottom) < barHeight) {
+            // Within a quarter of the reference: even. Beyond it: a hitch.
+            const bool even = abs(ms - uGraphTarget) <= 0.25 * uGraphTarget;
+            c = even ? vec4(0.2, 0.85, 0.3, 1.0) : vec4(0.95, 0.25, 0.2, 1.0);
+        }
+        const int targetRow = int(clamp(uGraphTarget / uGraphScale, 0.0, 1.0) * float(uGraphHeight));
+        if (rowFromBottom == targetRow) c = vec4(1.0, 1.0, 1.0, 0.9);
+    }
+
+    imageStore(uLayer, pixel, c);
+}

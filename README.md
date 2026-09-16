@@ -1,7 +1,7 @@
 # FSR3-lite
 
 Temporalni upscaler i procjena gibanja iz slike, implementirani od nule u C++20
-i OpenGL 4.6 compute shaderima. Radni dio diplomskog rada o kombiniranju
+i OpenGL 4.6 compute shaderima. Radni dio završnog rada o kombiniranju
 upscalinga i generiranja interpoliranih okvira (plan i opseg: [`PLAN.md`](PLAN.md)).
 
 Ključ postavke je vlastiti renderer: on može renderirati i *ground truth* —
@@ -31,21 +31,32 @@ Brojke i ablacije po modulu su u `docs/` (vidi niže); agregirane tablice u
 ## Ovisnosti
 
 - CMake ≥ 3.20, prevoditelj s C++20
-- GPU i driver s OpenGL 4.6 core (razvijano na Radeon RX 580 / Mesa)
+- GPU i driver s OpenGL 4.6 core (testirano na AMD RX 580/590, NVIDIA RTX 5070
+  i AMD RX 7800 XT)
 - SDL2 i libepoxy (traže se preko `pkg-config`)
 - Python 3 + Pillow, samo za skripte u `scripts/`
 
-Arch: `pacman -S cmake sdl2 libepoxy python-pillow` ·
-Debian/Ubuntu: `apt install cmake libsdl2-dev libepoxy-dev python3-pil`
+Instalacija (MSYS2, [msys2.org](https://www.msys2.org)) — u terminalu
+"MSYS2 MinGW x64":
+
+```sh
+pacman -S --needed mingw-w64-x86_64-cmake mingw-w64-x86_64-gcc \
+    mingw-w64-x86_64-SDL2 mingw-w64-x86_64-libepoxy \
+    mingw-w64-x86_64-python mingw-w64-x86_64-python-pillow
+```
 
 `third_party/` (stb_image, stb_image_write, cgltf) je u repozitoriju, ništa se
 ne dovlači pri buildu.
 
 ## Build
 
+Svaki novi MSYS2 MinGW x64 terminal prvo treba alate na `PATH`:
+
 ```sh
-scripts/fetch_assets.sh          # glTF scene — nisu u repozitoriju
-cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+export PATH="/c/msys64/mingw64/bin:$PATH"
+
+bash scripts/fetch_assets.sh      # glTF scene — nisu u repozitoriju
+cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -j
 ```
 
@@ -55,7 +66,7 @@ pa izmjena u `shaders/` ne traži rebuild.
 ## Pokretanje
 
 ```sh
-build/fsr3lite --scene assets/sponza/Sponza.gltf --upscaler fsr-rcas --scale 1.5
+build/fsr3lite.exe --scene assets/sponza/Sponza.gltf --upscaler fsr-rcas --scale 1.5
 ```
 
 Bez `--scene` renderira se ugrađena proceduralna scena. `--scale N` je faktor
@@ -79,9 +90,14 @@ tiho ne mjeri ono što mu piše u naredbi je gore od pada.
 ## Mjerenja
 
 ```sh
-python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
-.venv/bin/python scripts/run_metrics.py        # sve tablice, jednom naredbom
+export PATH="/c/msys64/mingw64/bin:$PATH"
+export PYTHONUTF8=1                            # ispravno kodiranje izlaza
+python3 scripts/run_metrics.py                 # sve tablice, jednom naredbom
 ```
+
+`run_metrics.py` nema ovisnosti izvan standardne biblioteke; Pillow (iz
+paketa gore) treba tek skriptama koje slažu slike (`ml_gallery.py`,
+`make_font_atlas.py`).
 
 Svako pokretanje je deterministično (skriptirana kamera, fiksni timestep, fiksni
 broj okvira), piše po-frame CSV i agregira ga u `captures/metrics/`. Ostale

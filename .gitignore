@@ -38,3 +38,10 @@ __pycache__/
 # scripts/ml_dataset.py ga ponovno snima; manifest s popisom putanja ostaje.
 /captures/ml/data/*.bin
 /captures/ml/demo/
+
+# LaTeX build izlaz (docs/thesis/) — pdflatex ih ponovno generira.
+/docs/thesis/*.aux
+/docs/thesis/*.log
+/docs/thesis/*.out
+/docs/thesis/*.toc
+/docs/thesis/*.synctex.gz

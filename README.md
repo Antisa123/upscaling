@@ -105,6 +105,7 @@ slike nisu — svaka skripta ih ponovno napravi.
 | [`docs/FRAMEGEN.md`](docs/FRAMEGEN.md) | M7: generiranje okvira |
 | [`docs/PACING.md`](docs/PACING.md) | M8: inpainting, UI, frame pacing, latencija |
 | [`docs/ML.md`](docs/ML.md) | M9: naučena mješavina |
+| [`docs/ML_KOMERCIJALNO.md`](docs/ML_KOMERCIJALNO.md) | poglavlje 3: komercijalna i istraživačka rješenja |
 | [`docs/NASTAVAK.md`](docs/NASTAVAK.md) | stanje i preostali posao |
 
 ## Struktura

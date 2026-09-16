@@ -185,7 +185,7 @@ Cilj: dokazati razumijevanje razlike između analitičkog (FSR3) i naučenog (DL
   Preporuka: **(a)** — manji model, jasno izolirana usporedba s heuristikom, manji rizik.
 - **Trening:** offline, PyTorch, na vanjskom GPU-u (Colab/fakultetski stroj) — lokalni RX 580 nema ROCm podršku.
 - **Inferencija:** izvoz težina → ručno pisani compute shader (mali model je izvediv u GLSL-u), ili, ako ne stane u budžet, offline inferencija i usporedba samo po kvaliteti + procjena troška.
-- **Poglavlje analize:** zašto ML pristupi traže matrix/tensor jedinice, što FSR4 Redstone donosi i uz koje hardverske uvjete.
+- **Poglavlje analize:** zašto ML pristupi traže matrix/tensor jedinice, što FSR4 Redstone donosi i uz koje hardverske uvjete — `docs/ML_KOMERCIJALNO.md`.
 
 **Odstupanja implementacije (M9, `docs/ML.md`):**
 - **Trening lokalno, vlastitim trenerom** (`tools/fg_train`, C++20 + OpenMP, CPU) umjesto PyTorcha na vanjskom GPU-u: projekt nema Python ovisnosti osim Pillowa, a model od nekoliko tisuća parametara uči se za ~8 min. Trener i shader provjeravaju se jedan naspram drugog na snimkama s izlazom shadera.
@@ -193,6 +193,7 @@ Cilj: dokazati razumijevanje razlike između analitičkog (FSR3) i naučenog (DL
 - **Inferencija je u GLSL-u na punoj rezoluciji**, ne offline; raspored prolaza optimiran izmjereno (4,18 → 2,75 ms bez promjene funkcije).
 - **Skup: 18 putanja za učenje + 4 validacijske, podjela po putanji;** mjerni pogledi nikad nisu snimljeni. Izbor modela radi se na cijelim okvirima validacijskih putanja, jer validacija na patchevima nije otkrila grešku maske na rubu okvira (−4 dB).
 - Usput popravljen NaN u povijesti FSR upscalera (dijeljenje s w = 0 u `gbuffer.frag` na prvom okviru); standardna mjerenja bit-identična.
+- **Demonstracija:** `scripts/ml_demo.sh` (cijeli postupak na malom primjeru, ~1 min) i `scripts/ml_gallery.py` (slike za rad iz spremljenih fg-ml mjerenja) — vidi odjeljak „Demonstracija" u `docs/ML.md`.
 
 ---
 

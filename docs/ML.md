@@ -394,6 +394,49 @@ pikselu; na validacijskim patchevima izabranog modela taj je limit 50,8 dB
 naspram 47,3 dB heuristike i 48,0 dB mreže). To je, u malom, argument zašto FSR4 i DLSS traže hardver koji
 FSR3 ne traži.
 
+## Demonstracija
+
+| Što | Kako |
+|---|---|
+| Cijeli postupak na malom primjeru (~1 min) | `scripts/ml_demo.sh`: snimi 2 putanje na 720p, istrenira c4-c8 u 1 500 koraka, provjeri shader naspram trenera i ispiše naredbu za interaktivno pokretanje. Zadnji put: +0,54 dB na kontrolnoj putanji, razlika shader/trener najviše 4,8·10⁻⁴. |
+| Uživo | `build/fsr3lite ... --fg --fg-ml captures/ml/weights/blend-c8-c16.bin`. Tipka **M** mijenja naučenu i heurističku mješavinu, tipka **0** kruži kroz prikaze 9 → 10 → 11. Prikaz **11** su težine mreže. |
+| Boje prikaza 11 | siva = heuristika · tamno/svijetlo zelena = igrini vektori iz t−1 / t · tamno/svijetlo plava = optical flow iz t−1 / t · crvena = trenutni okvir · narančasta = prethodni okvir |
+| Slike za rad | `python3 scripts/ml_gallery.py` → `captures/ml/gallery/*.png` i `legend.png`. Stupci: referenca · heuristika · mreža · težine · greška heuristike ×6 · greška mreže ×6, uz izreze gdje mreža najviše pomaže i gdje najviše šteti. |
+| Pojedinačni okviri | `--validate-fg --fg-shots DIR --fg-shot-frames 57,63` zapisuje `frameN_reference/_blend/_heuristic/_learned/_weights.png`. |
+
+Tri slike odabrane za rad, od osam koje skripta generira (najgori okvir
+heuristike, najveći dobitak i najveći gubitak mreže, po tri mjerna pogleda):
+
+- `captures/ml/gallery/sponza-20fps-frame18.png` — u istom okviru najveći
+  dobitak (izrez 512,640: 15,21 → 38,15 dB, mreža uklanja prugavi artefakt na
+  rubu stupa/prozora) i najveći gubitak (izrez 1152,768: 25,11 → 21,03 dB,
+  mreža zamuti sitnu granu lišća) na 20 fps, gdje je disokluzija najveća.
+- `captures/ml/gallery/sponza-1080p-q-frame57.png` — isti obrazac u
+  normalnom radnom režimu (1080p Quality, 1,5×): dobitak na rubu
+  disokluzije (stepenica, 18,32 → 22,83 dB), mali gubitak na ponavljajućoj
+  teksturi (39,55 → 31,51 dB na tom izrezu, uz +1,59 dB na cijelom okviru).
+- `captures/ml/gallery/proceduralna-frame67.png` — neviđena scena: razlika
+  je zanemariva i na najboljem izrezu (29,03 → 30,11 dB) i na cijelom okviru
+  (+0,30 dB), u skladu s nalazom da mreža na neviđenoj sceni ne dobiva ništa
+  (vidi tablicu veličine mreže gore).
+
+### Greška: prikaz težina usred izvođenja (popravljeno)
+
+Ako se prikaz težina (11) uključi usred izvođenja, varijanta shadera
+prevedena s `#define` i prvi put pokrenuta tek tada — s teksturom alociranom
+u istom okviru u kojem se prvi put i piše — pokvari taj okvir na Mesa/RX 580:
+26,6 dB umjesto 37,6 dB. Popravak je jedan program s uniformom
+`uWriteWeights` umjesto dvije `#define`-varijante, i tekstura alocirana
+unaprijed (`fg_ml_blend.comp`, `MlBlend::ensure`), pa uključivanje prikaza
+usred izvođenja ne prevodi ništa novo niti prvi put piše u tek alociranu
+teksturu. Provjera: 0 različitih okvira naspram izvođenja bez prikaza.
+
+Trajanje passa 12 ponovno je izmjereno nakon popravka (`--debug-view 0`
+naspram `--debug-view 11`, isti pogled, 1080p Quality, mirno računalo):
+grananje po uniformu ne mijenja cijenu — 0,18 ms naspram 0,22 ms na
+prolazu, 2,17 naspram 2,12 ms na cijelom okviru, razlika unutar šuma
+mjerenja na ovom GPU-u.
+
 ## Reprodukcija
 
 ```

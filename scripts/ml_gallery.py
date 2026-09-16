@@ -40,7 +40,8 @@ CANDIDATES = [("heuristika", (128, 128, 128)), ("game warp t-1", (13, 140, 13)),
 
 
 def font(size):
-    for path in ("/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+    for path in ("/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                 "/c/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arial.ttf"):
         if pathlib.Path(path).exists():
             return ImageFont.truetype(path, size)
     return ImageFont.load_default()
@@ -63,7 +64,8 @@ def pick_frames(row):
 def run_row(row, weights, frames, shots):
     entry = next(r for r in rm.RUNS if r[1] == f"{row}-heur")
     group, extra = entry[0], entry[3]
-    cmd = [str(REPO / "build" / "fsr3lite"), *rm.COMMON, "--frames", "120", *rm.GROUPS[group][0],
+    binary = REPO / "build" / ("fsr3lite.exe" if sys.platform == "win32" else "fsr3lite")
+    cmd = [str(binary), *rm.COMMON, "--frames", "120", *rm.GROUPS[group][0],
            *extra, "--fg-ml", str(weights), "--fg-shots", str(shots),
            "--fg-shot-frames", ",".join(str(f) for f in frames)]
     result = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)

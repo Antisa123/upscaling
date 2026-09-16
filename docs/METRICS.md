@@ -234,6 +234,8 @@ ostaje poštena.
 | `scripts/ml_dataset.py` | M9: snima skup za učenje (patchevi značajki, kandidata i referentnog međuokvira), podjela po putanji kamere |
 | `scripts/ml_sweep.sh` / `scripts/ml_train.sh` | M9: učenje modela (gubitak × sjeme; ablacije veličine i podataka) vlastitim trenerom `tools/fg_train` |
 | `scripts/ml_select.py` | M9: izbor modela na cijelim okvirima validacijskih putanja |
+| `scripts/ml_demo.sh` | M9: cijeli postupak (snimanje, učenje, provjera) na malom primjeru, ~1 min |
+| `scripts/ml_gallery.py` | M9: slike za rad iz spremljenih fg-ml mjerenja (`captures/ml/gallery/`) |
 
 Sve pišu u `captures/`, sve su bez vanjskih ovisnosti osim Pillowa ondje gdje
 sastavljaju sliku.

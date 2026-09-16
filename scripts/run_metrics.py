@@ -723,7 +723,7 @@ def check_scene_time(csv_path, name, cmd):
     dt = float(cmd[len(cmd) - 1 - cmd[::-1].index("--fixed-dt") + 1])
     if dt < 1e-5:
         return
-    with open(csv_path, newline="") as f:
+    with open(csv_path, newline="", encoding="utf-8") as f:
         times = [float(row["time_s"]) for row in csv.DictReader(f)]
     stalls = sum(1 for a, b in zip(times, times[1:]) if b <= a)
     if stalls:
@@ -757,7 +757,7 @@ def reduce_column(values, agg):
 
 
 def aggregate(csv_path, columns):
-    with csv_path.open() as f:
+    with csv_path.open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     if not rows:
         raise SystemExit(f"[agg] {csv_path} has no data rows")
@@ -803,7 +803,7 @@ def main():
                     help="run only these groups")
     args = ap.parse_args()
 
-    binary = REPO / args.build_dir / "fsr3lite"
+    binary = REPO / args.build_dir / ("fsr3lite.exe" if sys.platform == "win32" else "fsr3lite")
     if not binary.exists():
         raise SystemExit(f"[run] no binary at {binary}; build first (cmake --build {args.build_dir})")
 
@@ -844,7 +844,7 @@ def main():
               f"{', '.join(missing[:6])}{' ...' if len(missing) > 6 else ''}", flush=True)
 
     summary_csv = out_dir / "summary.csv"
-    with summary_csv.open("w", newline="") as f:
+    with summary_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         # One flat CSV for plotting: the union of all metric columns, with
         # blanks where a group does not measure something.
@@ -867,7 +867,7 @@ def main():
     document = "# Metrike\n\n" + "\n\n".join(sections) + "\n"
 
     summary_md = out_dir / "summary.md"
-    summary_md.write_text(document)
+    summary_md.write_text(document, encoding="utf-8")
 
     print()
     print(document)

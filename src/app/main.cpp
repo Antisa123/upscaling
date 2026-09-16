@@ -180,6 +180,11 @@ struct Options {
     // Scene time the run starts at, so a capture can cover a different
     // stretch of the animation than the measurement window does.
     double timeOffset = 0.0;
+    // M9 figures: at these frames (the CSV frame numbers) of a --validate-fg
+    // run, write the reference, the 50/50 blend, the heuristic, the learned
+    // blend and its weight view as PNGs into fgShots.
+    std::string fgShots;
+    std::vector<long long> fgShotFrames;
 
     // M8. How generated frames reach the screen. "paced" holds the real frame
     // back half a render period behind the generated one; "immediate" shows
@@ -356,6 +361,12 @@ int main(int argc, char** argv) {
         else if (arg == "--ml-patch-size" && i + 1 < argc) options.mlPatchSize = std::atoi(argv[++i]);
         else if (arg == "--ml-seed" && i + 1 < argc) options.mlSeed = static_cast<unsigned>(std::atoll(argv[++i]));
         else if (arg == "--time-offset" && i + 1 < argc) options.timeOffset = std::atof(argv[++i]);
+        else if (arg == "--fg-shots" && i + 1 < argc) options.fgShots = argv[++i];
+        else if (arg == "--fg-shot-frames" && i + 1 < argc) {
+            std::stringstream list(argv[++i]);
+            for (std::string item; std::getline(list, item, ',');)
+                if (!item.empty()) options.fgShotFrames.push_back(std::atoll(item.c_str()));
+        }
         else if (arg == "--filter-pattern") options.filterPattern = 1;
         else if (arg == "--no-filter-pattern") options.filterPattern = 0;
         else {
@@ -975,7 +986,19 @@ int main(int argc, char** argv) {
                     case SDLK_9: debugMode = 8; break;
                     // M7 views: the interpolated frame itself, and what the
                     // module thought while making it.
-                    case SDLK_0: debugMode = debugMode == 9 ? 10 : 9; break;
+                    // 9 the interpolated frame, 10 its masks, 11 the learned
+                    // blend's weight view when a network is loaded.
+                    case SDLK_0: {
+                        const int last = frameGen.ml().networkLoaded() ? 11 : 10;
+                        debugMode = debugMode >= 9 && debugMode < last ? debugMode + 1 : 9;
+                        break;
+                    }
+                    case SDLK_m:
+                        if (frameGen.ml().networkLoaded()) {
+                            frameGen.setMlEnabled(!frameGen.mlEnabled());
+                            std::printf("[app] blend: %s\n", frameGen.mlEnabled() ? "learned" : "heuristic");
+                        }
+                        break;
                     case SDLK_f:
                         gbuffer.setPatternFilter(!gbuffer.patternFilter());
                         std::printf("[app] pattern filter %s\n", gbuffer.patternFilter() ? "on" : "off");
@@ -1140,8 +1163,13 @@ int main(int argc, char** argv) {
                               timer.totalMs(), loadCount);
                 std::snprintf(lines[4], 96, "latency %5.1f ms  sample -> real present",
                               pacer.latencyMs());
-                std::snprintf(lines[5], 96, "graph: present intervals, line = target");
-                std::snprintf(lines[6], 96, "H hud  T tear lines  G frame gen  Y pacing");
+                if (frameGen.ml().networkLoaded())
+                    std::snprintf(lines[5], 96, "blend %s (c%d-c%d)  0: views 9-11",
+                                  frameGen.mlEnabled() ? "learned" : "heuristic", frameGen.ml().net().c0,
+                                  frameGen.ml().net().c1);
+                else
+                    std::snprintf(lines[5], 96, "graph: present intervals, line = target");
+                std::snprintf(lines[6], 96, "H hud  T tear  G frame gen  Y pacing  M blend");
                 hud.setLines(std::vector<std::string>(lines, lines + present::Hud::kRows));
                 static std::vector<float> intervals;
                 pacer.recentIntervals(intervals);
@@ -1230,6 +1258,10 @@ int main(int argc, char** argv) {
             fgInputs.renderHeight = renderHeight;
             fgInputs.flow = flow.valid() ? &flow.flow() : nullptr;
             fgInputs.reset = fgReset;
+            const bool fgShot = !options.fgShots.empty() &&
+                                std::find(options.fgShotFrames.begin(), options.fgShotFrames.end(),
+                                          frameCounter) != options.fgShotFrames.end();
+            frameGen.ml().setWeightView(debugMode == 11 || fgShot);
             frameGen.dispatch(fgInputs, timer);
             stageFlush();
         }
@@ -1314,6 +1346,18 @@ int main(int argc, char** argv) {
                 frameGen.ml().dumpPatches(mlDumpFile.get(), frameCounter, frameGen.heuristicOutput(),
                                           gtMidLdr, options.mlPatchSize, options.mlPatches, mlRng,
                                           !options.fgMl.empty());
+            if (!options.fgShots.empty() &&
+                std::find(options.fgShotFrames.begin(), options.fgShotFrames.end(), frameCounter) !=
+                    options.fgShotFrames.end()) {
+                const std::string base = options.fgShots + "/frame" + std::to_string(frameCounter);
+                writeTexture(*reference, base + "_reference.png");
+                writeTexture(frameGen.blend(), base + "_blend.png");
+                writeTexture(frameGen.heuristicOutput(), base + "_heuristic.png");
+                if (frameGen.ml().networkLoaded() && frameGen.mlEnabled()) {
+                    writeTexture(frameGen.ml().output(), base + "_learned.png");
+                    writeTexture(frameGen.ml().weights(), base + "_weights.png");
+                }
+            }
         }
 
         // Score the upscaled frame against the same instant rendered natively
@@ -1454,6 +1498,9 @@ int main(int argc, char** argv) {
                 source = &frameGen.output();
             else if (options.frameGen && debugMode == 10 && frameGen.valid())
                 source = &frameGen.debug();
+            else if (options.frameGen && debugMode == 11 && frameGen.valid() &&
+                     frameGen.ml().weights().valid())
+                source = &frameGen.ml().weights();
             else if (useUpscaler && debugMode == 0)
                 source = &finalFrame;
             else

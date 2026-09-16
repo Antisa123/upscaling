@@ -19,7 +19,11 @@ reference), a ne dojam.
 | M4 | TAAU: reprojekcija + akumulacija + neighbourhood clamp | ✅ |
 | M5 | puni upscaler: dilatacija vektora, depth disokluzija, Lanczos, lockovi, reactive | ✅ |
 | M6 | optical flow: piramidalni block matching, filtriranje, detekcija promjene scene | ✅ |
-| M7–M9 | generiranje okvira, frame pacing, naučeni modul | — |
+| M7 | generiranje okvira: warp, disokluzija, mješavina | ✅ |
+| M8 | inpainting, UI kompozicija, frame pacing, latencija | ✅ |
+| M9 | naučena mješavina (mala mreža u compute shaderima, vlastiti trener) | ✅ |
+
+**Gdje nastaviti:** [`docs/NASTAVAK.md`](docs/NASTAVAK.md).
 
 Brojke i ablacije po modulu su u `docs/` (vidi niže); agregirane tablice u
 `captures/metrics/summary.md`.
@@ -98,6 +102,10 @@ slike nisu — svaka skripta ih ponovno napravi.
 | [`docs/TAAU.md`](docs/TAAU.md) | M4: minimalni temporalni upscaler |
 | [`docs/FSR.md`](docs/FSR.md) | M5: puni upscaler |
 | [`docs/OPTICALFLOW.md`](docs/OPTICALFLOW.md) | M6: procjena gibanja iz slike |
+| [`docs/FRAMEGEN.md`](docs/FRAMEGEN.md) | M7: generiranje okvira |
+| [`docs/PACING.md`](docs/PACING.md) | M8: inpainting, UI, frame pacing, latencija |
+| [`docs/ML.md`](docs/ML.md) | M9: naučena mješavina |
+| [`docs/NASTAVAK.md`](docs/NASTAVAK.md) | stanje i preostali posao |
 
 ## Struktura
 

@@ -23,6 +23,8 @@ __pycache__/
 # Linkovi na izvornik su u docs/reference/README.md.
 /docs/reference/*
 !/docs/reference/README.md
+# Naše bilješke o komercijalnim ML rješenjima (izvor za poglavlje 3 rada).
+!/docs/reference/ml_commercial_notes.md
 
 # Snimke: mjerni podaci (CSV, Markdown tablice) idu u repozitorij jer su
 # rezultat mjerenja; renderirani okviri ne idu jer ih svaka skripta iz
@@ -35,3 +37,4 @@ __pycache__/
 # M9: skup za učenje mreže (desetci patcheva po okviru, ~200 MB po putanji).
 # scripts/ml_dataset.py ga ponovno snima; manifest s popisom putanja ostaje.
 /captures/ml/data/*.bin
+/captures/ml/demo/

@@ -130,6 +130,10 @@ public:
     // Passes 7-9 only, whatever the learned blend did with them.
     const gfx::Texture2D& heuristicOutput() const { return output_; }
     MlBlend& ml() { return ml_; }
+    // Runtime switch between the learned blend and the heuristic, for
+    // showing the two side by side; the network stays loaded while off.
+    void setMlEnabled(bool on) { mlEnabled_ = on; }
+    bool mlEnabled() const { return mlEnabled_; }
     // 50/50 blend of the same two frames; only filled when measureBlend is set.
     const gfx::Texture2D& blend() const { return blend_; }
     // Display resolution, rgb = (occlusion vs previous, occlusion vs current,
@@ -182,6 +186,7 @@ private:
 
     MlBlend ml_;
     bool mlValid_ = false;
+    bool mlEnabled_ = true;
 
     Options options_;
     int displayWidth_ = 0;

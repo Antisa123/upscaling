@@ -367,7 +367,7 @@ const gfx::Texture2D& FrameGenerator::dispatch(const Inputs& in, gfx::GpuTimer& 
         // M9: the learned blend reads everything above, including the
         // previous frame, so it runs before that is overwritten.
         mlValid_ = false;
-        if (ml_.enabled() && !reset) {
+        if (ml_.enabled() && mlEnabled_ && !reset) {
             MlInputs ml;
             ml.current = in.current;
             ml.previous = &prevColor_;

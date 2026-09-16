@@ -9,6 +9,16 @@
 // same function the feature pass used.
 //
 // HIDDEN_LAYERS  c0 / 4, rounded up
+//
+// uWriteWeights also writes the weight view: every candidate has a colour and
+// a pixel shows the mixture of colours its weights chose -- grey heuristic,
+// green game vector warps (dark from t-1, light from t), blue flow warps (dark
+// t-1, light t), red and orange the unwarped current and previous frames.
+// It is a uniform, with the image always bound, and not a second program: a
+// define-compiled variant that was first dispatched in the middle of a run,
+// with its image allocated on that frame, corrupted that frame's output on
+// this driver (26.6 dB instead of 37.6 dB); used from the first frame it did
+// not. One program with nothing to allocate later cannot hit that.
 
 #include "fg_ml_common.glsl"
 
@@ -17,6 +27,11 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 6) uniform sampler2DArray uSkip;     // enc0, display resolution
 layout(binding = 7) uniform sampler2DArray uDecoder;  // dec1, half resolution
 layout(rgba16f, binding = 0) uniform writeonly image2D uOutput;
+layout(rgba8, binding = 1) uniform writeonly image2D uWeights;
+uniform int uWriteWeights;
+const vec3 kCandidateColors[kMlCandidates] =
+    vec3[](vec3(0.5), vec3(0.05, 0.55, 0.05), vec3(0.45, 1.0, 0.35), vec3(0.05, 0.2, 0.8),
+           vec3(0.35, 0.8, 1.0), vec3(1.0, 0.15, 0.1), vec3(1.0, 0.6, 0.1));
 
 layout(std430, binding = 0) readonly buffer Weights {
     mat4 w[2 * HIDDEN_LAYERS];
@@ -41,11 +56,14 @@ void main() {
     float top = logits[0];
     for (int k = 1; k < kMlCandidates; ++k) top = max(top, logits[k]);
     vec3 color = vec3(0.0);
+    vec3 view = vec3(0.0);
     float total = 0.0;
     for (int k = 0; k < kMlCandidates; ++k) {
         const float weight = exp(logits[k] - top);
         color += weight * s.c[k];
+        view += weight * kCandidateColors[k];
         total += weight;
     }
     imageStore(uOutput, pos, vec4(color / total, 1.0));
+    if (uWriteWeights != 0) imageStore(uWeights, pos, vec4(view / total, 1.0));
 }

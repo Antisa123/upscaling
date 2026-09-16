@@ -49,6 +49,9 @@ public:
     // Returns true if output() holds this frame's ML image.
     bool dispatch(const MlInputs& in, gfx::GpuTimer& timer);
     const gfx::Texture2D& output() const { return output_; }
+    // The weight view (fg_ml_blend.comp, uWriteWeights): filled while on.
+    void setWeightView(bool on) { weightView_ = on; }
+    const gfx::Texture2D& weights() const { return weights_; }
 
     // Dataset capture: `count` patches of this frame, half uniformly random
     // and half drawn in proportion to the heuristic's error, appended to
@@ -81,6 +84,8 @@ private:
     gfx::Texture2DArray candidates_;   // capture only
     gfx::Texture2DArray enc0_, pooled0_, enc1_, pooled1_, enc2_, enc3_, sum1_, dec1_;
     gfx::Texture2D output_;
+    gfx::Texture2D weights_;
+    bool weightView_ = false;
     int width_ = 0;
     int height_ = 0;
 };

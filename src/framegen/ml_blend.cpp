@@ -105,6 +105,8 @@ void MlBlend::destroy() {
                                    &enc2_, &enc3_, &sum1_, &dec1_})
         t->destroy();
     output_.destroy();
+    weights_.destroy();
+    weightView_ = false;
     loaded_ = dump_ = fits_ = lastValid_ = headerWritten_ = false;
     width_ = height_ = 0;
 }
@@ -147,6 +149,9 @@ void MlBlend::ensure(int width, int height) {
     sum1_.ensure(width / 2, height / 2, l1, GL_RGBA16F, "ml.sum1");
     dec1_.ensure(width / 2, height / 2, l0, GL_RGBA16F, "ml.dec1");
     output_.ensure(width, height, GL_RGBA16F, 1, "ml.output");
+    // Allocated with everything else, whether or not the view is ever shown:
+    // see fg_ml_blend.comp for what allocating it mid-run did.
+    weights_.ensure(width, height, GL_RGBA8, 1, "ml.weights");
 }
 
 void MlBlend::bindCommon(const gfx::Program& program, const MlInputs& in) const {
@@ -228,6 +233,8 @@ bool MlBlend::dispatch(const MlInputs& in, gfx::GpuTimer& timer) {
         enc0_.bindTexture(6);
         dec1_.bindTexture(7);
         output_.bindImage(0, GL_WRITE_ONLY);
+        weights_.bindImage(1, GL_WRITE_ONLY);
+        blend_.set("uWriteWeights", weightView_ ? 1 : 0);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, buffers_[ml::kDec0]);
         blend_.dispatch(width_, height_);
         barrier();

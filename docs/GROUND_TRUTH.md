@@ -43,7 +43,9 @@ Referentni okviri se renderiraju bez jittera (`GBuffer::render(..., useJitter=fa
 referenca ne smije imati sub-pixel pomak koji bi se poslije morao poništavati.
 
 Trošak: drugi G-buffer u punoj rezoluciji, pa se stvara samo kad se traži. Na
-1080p su to dva dodatna passa po okviru (~0,38 ms svaki na RX 580) i tri PNG-a.
+1080p su to dva dodatna passa po okviru (`ref: GT native`/`ref: GT midpoint`,
+~2,7–3,0 ms svaki na NVIDIA RTX 5070, jer je pass 2×2 supersempliran) i tri
+PNG-a.
 
 ## Provjera
 

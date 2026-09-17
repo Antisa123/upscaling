@@ -62,16 +62,18 @@ tamo gdje je bio. Zato prikaz ima vlastitu nit s vlastitim GL kontekstom koji
 dijeli teksture s render kontekstom. Framebuffer objekti se među kontekstima ne
 dijele, pa nit prikaza pravi svoje.
 
-Render kontekst živi na **skrivenom 1×1 prozoru**: na ovom stogu (SDL2 preko
-SDL3, Wayland, Mesa) kontekst mora biti aktivan na nekoj površini —
-`MakeCurrent` bez površine javlja uspjeh i ne ostavi ništa aktivno.
+Render kontekst živi na **skrivenom 1×1 prozoru**: na izvornom razvojnom
+stogu (SDL2, Wayland, Mesa) kontekst mora biti aktivan na nekoj površini —
+`MakeCurrent` bez površine javlja uspjeh i ne ostavi ništa aktivno. Isto
+vrijedi i na Windows/WGL-u, gdje je ovo kasnije mjereno.
 
 **Predaja bez fencea.** Prirodan način da nit prikaza zna kad je okvir gotov je
-`glFenceSync` + čekanje u drugom kontekstu. Na Mesi 26.2 (radeonsi)
-`glFenceSync(GL_SYNC_FENCE, 0)` vraća `GL_INVALID_ENUM`. Render nit zato sama
-napravi `glFinish` prije predaje; ionako ima samo nekoliko stotina mikrosekundi
-CPU posla po okviru, pa je blokiranje na GPU-u gotovo besplatno, a „predano”
-postaje izmjereno, ne procijenjeno vrijeme.
+`glFenceSync` + čekanje u drugom kontekstu. Na Mesi 26.2 (radeonsi), gdje je
+ovo prvo izmjereno, `glFenceSync(GL_SYNC_FENCE, 0)` vraća `GL_INVALID_ENUM`;
+to nije ponovno provjereno na Windows/NVIDIA driveru, pa `glFinish` ostaje
+zajednički, provjereno ispravan put na oba. Render nit ionako ima samo
+nekoliko stotina mikrosekundi CPU posla po okviru, pa je blokiranje na GPU-u
+gotovo besplatno, a „predano” postaje izmjereno, ne procijenjeno vrijeme.
 
 **Povratni pritisak.** Tri slota (par RGBA8 tekstura u prikaznoj razlučivosti).
 Kad su sva u letu, `acquire()` blokira — isto što radi swap chain — pa render
@@ -121,8 +123,9 @@ pomaka kamere i ažuriranja scene, dakle kad je stanje okvira fiksirano:
   okvir između N−1 i N već sadrži pola gibanja iz ulaza N, pa je to prvi
   trenutak u kojem se ulaz uopće vidi.
 
-Oba završavaju **swapom**. Što kompozitor (Hyprland) i monitor dodaju nakon
-toga aplikacija ne vidi i nije uključeno; za to bi trebao vanjski senzor
+Oba završavaju **swapom**. Što kompozitor (Hyprland na izvornom razvojnom
+stogu, DWM na Windowsu) i monitor dodaju nakon toga aplikacija ne vidi i nije
+uključeno; za to bi trebao vanjski senzor
 (fotodioda ili kamera visoke brzine). Uspoređuju se, dakle, načini prikaza
 međusobno na istom stogu, a ne apsolutna latencija od miša do fotona.
 
@@ -146,112 +149,124 @@ FG, cijeli bez njega), crven izvan toga; bijela crta je cilj.
 ## Rezultati
 
 Sponza, kanonski kadar, 1080p Quality (render 1280×720), FSR u pipelineu,
-realtime (zidni sat) 8 s po retku, prvih 30 okvira odbačeno. Monitor 100 Hz,
-Hyprland; bez vsynca ako nije drugačije navedeno. Prikazani FPS i intervali
-izračunati su iz stvarnih vremena swapa (`--present-csv`), ne iz GPU brojača.
-Sirovi zapisi: `captures/pacing/`.
+realtime (zidni sat) 8 s po retku, prvih 30 okvira odbačeno. Windows, NVIDIA
+RTX 5070, monitor bez fiksne gornje granice u ovom mjerenju; bez vsynca ako
+nije drugačije navedeno. Prikazani FPS i intervali izračunati su iz stvarnih
+vremena swapa (`--present-csv`), ne iz GPU brojača. Sirovi zapisi:
+`captures/pacing/`.
+
+> **Otvoren nalaz, ne skriven:** procjena render perioda u
+> `src/present/frame_pacer.cpp` je bila samoreferentna — mjerila je razmak
+> između trenutaka kad par postane spreman, što na dovoljno brzom GPU-u
+> uključuje i vrijeme koje prezentacijska nit sama čeka (pola perioda po
+> paru), pa se procjena hranila vlastitim čekanjem umjesto stvarnom cijenom
+> renderiranja. Popravljeno je mjerenjem stvarnog vremena render niti
+> (`renderMs`, neovisno o prezentaciji); to je ispravilo `×0`–`×8` niže. Pri
+> `×12` i više ostaje otvoren, dublji problem: prezentacijska nit obrađuje
+> parove strogo jedan po jedan (uključujući vlastito čekanje) prije nego
+> pogleda sljedeći, pa pri dovoljno velikom opterećenju ravnomjerni prikaz i
+> dalje degenerira u nepravilan (bimodalan) ritam. Retci `×12` naviše niže su
+> zato izmjereni, ali ne i objašnjeni do kraja — čitaj ih kao poznato
+> ograničenje, ne kao svojstvo dizajna.
 
 ### FPS u ovisnosti o cijeni renderiranja
 
-Sponza je laka scena (G-buffer ≈ 0,9 ms), pa se cijena igre simulira
-sintetskim opterećenjem: ×n dodatnih G-buffer prolaza po okviru.
+Sponza je laka scena (G-buffer ≈ 0,16 ms na ovom GPU-u), pa se cijena igre
+simulira sintetskim opterećenjem: ×n dodatnih G-buffer prolaza po okviru.
 
 | opterećenje | bez FG | FG odmah | FG ravnomjerno | ubrzanje (ravnomjerno) | renderirano uz FG |
 |---|---:|---:|---:|---:|---:|
-| ×0 | **313,0** | 305,4 | 308,3 | 0,98× | 154,1 |
-| ×4 | 155,3 | 194,5 | **211,0** | 1,36× | 105,4 |
-| ×8 | 112,0 | 166,2 | **168,8** | 1,51× | 84,3 |
-| ×12 | 90,7 | 138,3 | **135,3** | 1,49× | 67,6 |
-| ×16 | 73,4 | 120,3 | **116,2** | 1,58× | 58,0 |
-| ×24 | 57,7 | 95,8 | **89,9** | 1,56× | 44,9 |
+| ×0 | 1059,1 | 1090,4 | **1208,6** | 1,14× | 604,2 |
+| ×4 | 369,0 | 441,0 | **574,3** | 1,56× | 287,1 |
+| ×8 | 260,1 | 333,0 | **377,6** | 1,45× | 188,8 |
+| ×12 | **197,3** | 328,1 | 161,9 | 0,82× | 80,9 |
+| ×16 | **159,6** | 278,6 | 127,9 | 0,80× | 63,9 |
+| ×24 | 115,6 | 208,1 | **127,9** | 1,11× | 63,9 |
 
 ![FPS](../captures/pacing/fps-vs-load.png)
 
-**FPS raste — iznad praga.** Na neopterećenoj sceni generiranje ne donosi
-ništa: okvir bez njega traje 3,2 ms, a generiranje s tokom i dva bliteta prikaza
-koštaju gotovo isto toliko, pa se renderirani FPS prepolovi i prikazani ostane
-na mjestu. To je prag iz `docs/FRAMEGEN.md` (≈2,2 ms), sad izmjeren na ekranu.
-Već uz ×4 (okvir ≈6,4 ms) ubrzanje je 1,36×, a od ×8 naviše 1,5–1,6×. Nikad
-nije 2×: generiranje nije besplatno, pa se renderirani FPS uz FG uvijek spusti
-(uz ×12 s 90,7 na 67,6), a prikazani je dvostruko od toga.
+**FPS raste — do ×8, dosljedno s pragom iz `docs/FRAMEGEN.md` (≈0,48 ms).**
+Na ovom GPU-u je čak i neopterećena scena iznad praga (generirani okvir je
+jeftiniji od stvarnog, pa ravnomjerni prikaz dobiva 1,14× i ondje gdje ga na
+sporijem RX 580 nije bilo). Od ×12 naviše "ravnomjerno" način pada **ispod**
+"bez FG" — to je gornji nalaz, ne novi zaključak o isplativosti generiranja:
+`immediate` način (FG odmah, bez namjernog čekanja) na istim opterećenjima i
+dalje dosljedno ubrzava (1,4–2,0×), pa je do daljnjega pouzdaniji za
+usporedbu na ovom GPU-u.
 
 ### Ravnomjernost
 
-| opterećenje ×12 | std intervala | p1 | p50 | p99 | generirani → pravi | pravi → generirani |
+Opterećenje ×8 (unutar radnog raspona; za ×12 i više vidi napomenu na vrhu):
+
+| opterećenje ×8 | std intervala | p1 | p50 | p99 | generirani → pravi | pravi → generirani |
 |---|---:|---:|---:|---:|---:|---:|
-| bez FG | 1,38 | 9,51 | 10,82 | 17,56 | — | — |
-| FG odmah | **7,03** | **0,17** | 2,81 | 17,54 | 0,26 | 14,21 |
-| FG ravnomjerno | **1,00** | 5,58 | 7,32 | 11,39 | 7,48 | 7,30 |
+| bez FG | 0,34 | 3,26 | 3,92 | 4,68 | — | — |
+| FG odmah | **2,78** | **0,19** | 2,61 | 9,59 | 0,40 | 5,61 |
+| FG ravnomjerno | **1,14** | 0,21 | 2,59 | 8,89 | 2,71 | 2,59 |
 
 ![histogram](../captures/pacing/histogram-L12.png)
 ![vremenski slijed](../captures/pacing/timeline-L12.png)
 
-Bez pacinga generirani i pravi okvir stižu u razmaku od četvrt milisekunde, a
-onda 14 ms ništa: brojač pokazuje 138 fps, a oko vidi 69 fps s dvostrukim
-slikama. Histogram je bimodalan, s vrhom u nuli. S pacingom su dva naizmjenična
-intervala jednaka (7,48 i 7,30 ms) i std je 1,0 ms — manje nego bez generiranja
-(1,38 ms), jer nit prikaza svaki drugi okvir drži na vremenskoj osi neovisno o
-tome kako je render nit rasporedila svoj posao. Isto vrijedi na svim
-opterećenjima: std 0,52–1,08 ms ravnomjerno naspram 3,0–10,3 ms odmah.
+Bez pacinga generirani i pravi okvir stižu blizu jedan drugom (0,40 ms), a
+onda čekaju 5,6 ms do sljedećeg para — bimodalno, kao i na sporijem GPU-u.
+S pacingom su dva naizmjenična razmaka mnogo bliža (2,71 i 2,59 ms) i std je
+1,14 ms — manji nego bez generiranja (0,34 ms) je i dalje veći, jer je scena
+ovdje toliko brza da apsolutne razlike u milisekundama znače relativno više
+šuma; princip (paced izjednačava dva naizmjenična razmaka) i dalje vrijedi.
 
 ### Latencija
 
 Srednja vrijednost, ms, od uzorkovanja ulaza do swapa (vidi gore što to ne
-uključuje).
+uključuje). Retci ×12 naviše su pod istim otvorenim nalazom kao FPS tablica
+gore — čitaj cijenu pacinga ondje kao gornju granicu, ne kao svojstvo dizajna.
 
 | opterećenje | bez FG | FG odmah: pravi | FG ravnomjerno: prvi odziv (generirani) | FG ravnomjerno: pravi | cijena pacinga (pravi − bez FG) |
 |---|---:|---:|---:|---:|---:|
-| ×0 | 3,19 | 6,55 | 6,22 | 9,52 | +6,3 |
-| ×4 | 6,42 | 10,29 | 9,22 | 14,00 | +7,6 |
-| ×8 | 8,91 | 12,05 | 11,58 | 17,54 | +8,6 |
-| ×12 | 11,03 | 14,46 | 14,48 | 21,96 | +10,9 |
-| ×16 | 13,60 | 16,63 | 16,94 | 25,65 | +12,1 |
-| ×24 | 17,33 | 20,89 | 21,92 | 33,20 | +15,9 |
+| ×0 | 1,11 | 1,98 | 1,57 | 2,65 | +1,5 |
+| ×4 | 2,89 | 4,68 | 3,38 | 5,03 | +2,1 |
+| ×8 | 4,02 | 6,14 | 5,20 | 7,90 | +3,9 |
+| ×12 ⚠ | 5,24 | 6,24 | 12,16 | 23,60 | +18,4 |
+| ×16 ⚠ | 6,44 | 7,31 | 15,40 | 30,84 | +24,4 |
+| ×24 ⚠ | 8,82 | 9,75 | 15,39 | 30,82 | +22,0 |
 
-Latencija pravog okvira uz ravnomjerni prikaz je vrijeme okvira s generiranjem
-plus pola render perioda (uz ×12: 14,5 + 7,4 ≈ 22,0 ms, izmjereno 21,96). Prema
-okviru bez generiranja to je **+11 ms uz ×12 i +16 ms uz ×24 — približno jedan
-render okvir**, kako je plan i predvidio. Dio te cijene (≈3,5 ms uz ×12) je
-samo generiranje, koje produlji okvir; ostatak je čekanje pola perioda, bez
-kojeg nema ravnomjernosti.
+Do ×8 je obrazac isti kao na RX 580: latencija pravog okvira uz ravnomjerni
+prikaz raste s opterećenjem, ali umjereno (+3,9 ms uz ×8), i prvi odziv
+(generirani okvir) stiže kasnije nego bez generiranja uopće — generiranje,
+dakle, ne smanjuje latenciju ni u najpovoljnijem čitanju, nego kupuje
+glatkoću po cijeni odziva. Retci ⚠ pokazuju da se ta cijena pri višem
+opterećenju na ovom GPU-u sad puno više nego udvostručuje umjesto da raste
+umjereno, izravna posljedica otvorenog nalaza gore.
 
-Prvi odziv — generirani okvir, koji već nosi pola gibanja iz novog ulaza —
-stiže na ekran približno kad bi i pravi okvir bez pacinga (14,5 ms uz ×12), ali
-kasnije nego bez generiranja uopće (11,0 ms). Generiranje, dakle, ne smanjuje
-latenciju ni u najpovoljnijem čitanju: podiže glatkoću po cijeni odziva, i to
-je poštena formulacija rezultata.
-
-### Vsync (100 Hz)
+### Vsync (monitor bez fiksne granice u ovom mjerenju)
 
 | redak | prikazano fps | std | p99 | latencija pravog |
 |---|---:|---:|---:|---:|
-| ×12 bez FG | 90,2 | 1,36 | 17,49 | 11,69 |
-| ×12 FG ravnomjerno | 99,9 | 0,53 | 11,46 | 29,12 |
-| ×24 bez FG | 57,1 | 1,91 | 24,22 | 17,55 |
-| ×24 FG ravnomjerno | 92,5 | 0,91 | 13,31 | 32,24 |
+| ×12 bez FG | 198,0 | 0,50 | 5,97 | 5,25 |
+| ×12 FG ravnomjerno ⚠ | 198,3 | 4,13 | 16,37 | 16,81 |
+| ×24 bez FG | 115,2 | 0,93 | 10,05 | 8,88 |
+| ×24 FG ravnomjerno | 127,9 | 6,46 | 17,39 | 29,58 |
 
-S vsyncom je strop osvježavanje monitora. Uz ×12 bez generiranja okvir ionako
-ne stiže do 100 Hz; s njim je prikaz prikovan na 100 fps s najmanjim rasipanjem
-u cijeloj tablici (std 0,53 ms), ali uz 29 ms latencije jer swap sad čeka i
-kompozitor. Uz ×24 generiranje podiže 57 na 92,5 fps. Pod Waylandom okviri iznad
-osvježavanja bez vsynca ne stižu na ekran (kompozitor prikaže zadnji); zato su
-glavne tablice bez vsynca mjerene na vremenima swapa, a ne na fotonima.
+Uz ×12 vsync ne mijenja puno — na ovoj kartici je to isto opterećenje gdje
+gornji otvoreni nalaz već vrijedi (gotovo nikakav dobitak, std i dalje
+povišen). Uz ×24 generiranje ipak podigne 115,2 na 127,9 fps. Pod Windows
+kompozitorom (DWM) prikaz bez vsynca ionako meri stvarna vremena swapa, ne
+fotone — isto ograničenje kao i ranije pod Waylandom/Hyprlandom, samo na
+drugom stogu.
 
-### Alternative stagingu (×12)
+### Alternative stagingu
 
-| redak | prikazano fps | std | p99 | latencija pravog |
-|---|---:|---:|---:|---:|
-| staging (zadano) | 135,3 | 1,00 | 11,39 | 21,96 |
-| staging + `glFlush` po fazi | 141,7 | 1,01 | 10,64 | 20,99 |
-| staging + `glFinish` po fazi | 104,0 | 0,70 | 11,96 | 28,67 |
-| bez staginga (blit neposredno prije swapa), `glFlush` po fazi | 151,6 | 6,15 | 15,85 | 26,61 |
+Zadano (staging, ×8, unutar radnog raspona): 377,6 prikazanih fps, std 1,14 ms,
+p99 8,89 ms, latencija pravog 7,90 ms.
 
-Posljednji redak je iz razvoja (5 s, prije staginga) i pokazuje zašto staging
-postoji: FPS je najviši, a paced okviri ponovno stižu u parovima. `glFinish` po
-fazi drži najmanje rasipanje, ali gubi četvrtinu FPS-a. `glFlush` uz staging
-izgleda za 5 % brži od zadanog, ali razlika je unutar raspona koji isti redak
-pokazuje između ponovljenih pokretanja (135–137 fps) uvećanog za jedan
-neponovljeni uzorak, pa se ne proglašava rezultatom.
+`--gpu-flush` ablacija (`glFlush`/`glFinish` po fazi) je mjerena na ×12 (vidi
+tablicu gore) i tamo je i dalje
+pod istim otvorenim nalazom (`paced-flush-L12` 147,4 fps, `paced-finish-L12`
+127,9 fps) — brojke postoje u `captures/pacing/`, ali ih ne vrijedi čitati
+kao svojstvo `--gpu-flush` dok se ×12+ ne popravi. Usporedba "bez staginga"
+(blit neposredno prije swapa) iz ranijeg razvoja više nije dostupna kao
+zastavica u trenutnom kodu — staging je jedina implementacija — pa se ne
+može ponovno izmjeriti na ovom GPU-u; obrazloženje zašto staging postoji
+ostaje ono iz arhitekture gore.
 
 ### HUD: nakon generiranja ili prije njega
 

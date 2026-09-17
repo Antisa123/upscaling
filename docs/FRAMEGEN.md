@@ -319,51 +319,49 @@ Pokrivenost s maskama ili bez njih daje isto do stotinke — dvostruko maskirani
 piksela je premalo da bi se vidjeli u prosjeku.
 
 Prolazi ostaju uključeni jer su dio FSR3 lanca, pri preporučenoj baznoj brzini
-(≥ 60 fps) ne štete, a koštaju 0,235 ms; `--fg-inpaint 0 --fg-bounds 0` vraća
+(≥ 60 fps) ne štete, a koštaju 0,05 ms; `--fg-inpaint 0 --fg-bounds 0` vraća
 M7 ponašanje. Rezultat je iskazan kakav jest: na ovim scenama inpainting slike
 nema što popraviti, a na vrlo niskoj baznoj brzini malo odmaže.
 
 ## Cijena
 
-GPU vrijeme u ms na RX 580, orbita 60 fps, 120 okvira, bez validacije.
-Tablica je stanje M7; M8 generiranju dodaje 0,235 ms za prolaze 8–9 (1,593 →
-1,829 ms na 1080p Quality), a pravi prikaz s generiranjem ima dva prolaza
-kompozicije umjesto jednog (0,255 naspram 0,127 ms).
+GPU vrijeme u ms na NVIDIA RTX 5070, `--frames 300`, fiksni korak, bez
+validacije. Tablica je stanje M7 (`--fg-inpaint 0 --fg-bounds 0`); M8
+generiranju dodaje ~0,05 ms za prolaze 8–9 na 1080p Quality (0,24 → 0,29 ms).
 „Pipeline” je okvir bez generiranja (G-buffer, tonemap, FSR, present).
 
 | Konfiguracija | pipeline | optical flow | generiranje | generiranje bez toka | ukupno s generiranjem |
 |---|---|---|---|---|---|
-| 1080p Quality | 2,165 | 0,616 | **1,593** | 1,242 | 4,342 |
-| 1080p native | 2,902 | 0,578 | 2,820 | 2,118 | 6,269 |
-| 1080p Performance | 1,783 | 0,592 | 1,132 | 0,924 | 3,480 |
-| 720p Quality | 1,103 | 0,318 | 0,713 | 0,555 | 2,148 |
+| 1080p Quality | 0,41 | 0,24 | **0,24** | 0,19 | 0,87 |
+| 1080p native | 0,58 | 0,25 | 0,37 | 0,27 | 1,21 |
+| 1080p Performance | 0,34 | 0,24 | 0,20 | 0,15 | 0,80 |
+| 720p Quality | 0,20 | 0,17 | 0,14 | 0,10 | 0,52 |
 
 Po prolazu, 1080p Quality (polja 1280×720):
 
 | Prolaz | ms |
 |---|---|
-| 1 setup | 0,093 |
-| 2 dubina međuokvira | 0,083 |
-| 3+4 game polje (scatter, razrješenje, piramida) | 0,304 |
-| 5+4 polje toka (scatter, razrješenje, piramida) | 0,250 |
-| 6 maske disokluzije | 0,160 |
-| 7 interpolacija (prikazna razlučivost) | 0,539 |
-| kopija okvira za idući par | ≈0,16 |
+| 1 setup | 0,012 |
+| 2 dubina međuokvira | 0,011 |
+| 3+4 game polje (scatter, razrješenje, piramida) | 0,048 |
+| 5+4 polje toka (scatter, razrješenje, piramida) | 0,047 |
+| 6 maske disokluzije | 0,028 |
+| 7 interpolacija (prikazna razlučivost) | 0,060 |
+| kopija okvira za idući par | nije zasebno mjerena (nema svoj GPU timer) |
 
 Prolazi nad poljima skaliraju s render razlučivošću, interpolacija s prikaznom:
-zato Performance štedi na poljima (0,17 umjesto 0,30 ms), a interpolacija ostaje
-gotovo ista.
+zato Performance štedi na poljima (0,04 umjesto 0,05 ms po polju), a
+interpolacija ostaje gotovo ista.
 
-**Isplati li se.** Međuokvir s tokom košta 1,59 + 0,62 = 2,21 ms, a pravi okvir
-ovog pipelinea 2,17 ms. Na ovoj testnoj sceni generiranje, dakle, **ne donosi
-FPS**: G-buffer Sponze traje 0,9 ms, dok je u stvarnoj igri okvir 10–30 ms.
-Cijena generiranja ne ovisi o složenosti scene nego samo o razlučivosti, pa je
-prag isplativosti na 1080p Quality oko 2,2 ms rendera s tokom, odnosno 1,2 ms
-bez njega (uz 0,14 dB manje i najgori okvir niži za 0,87 dB). Svaka scena teža
-od ove je iznad praga. Stvarni prikazani FPS, ravnomjernost vremena prikaza i
-latencija izmjereni su u M8 (`docs/PACING.md`): na neopterećenoj sceni FG
-gubi (313 → 308 fps), uz sintetsko opterećenje od ×4 naviše prikazani FPS raste
-1,36–1,58×.
+**Isplati li se.** Međuokvir s tokom košta 0,24 + 0,24 = 0,48 ms, a pravi okvir
+ovog pipelinea 0,41 ms. Isti zaključak kao na sporijem GPU-u: na ovoj testnoj
+sceni generiranje **ne donosi FPS** — G-buffer Sponze traje 0,16 ms, dok je u
+stvarnoj igri okvir 10–30 ms. Cijena generiranja ne ovisi o složenosti scene
+nego samo o razlučivosti, pa je
+prag isplativosti na 1080p Quality oko 0,48 ms rendera s tokom, odnosno
+0,19 ms bez njega (uz 0,14 dB manje i najgori okvir niži za 0,87 dB). Svaka
+scena teža od ove je iznad praga. Stvarni prikazani FPS, ravnomjernost
+vremena prikaza i latencija izmjereni su u M8 (`docs/PACING.md`).
 
 ## Figure
 

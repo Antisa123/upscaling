@@ -35,6 +35,10 @@ add_executable(fsr3lite
 target_include_directories(fsr3lite PRIVATE src)
 target_include_directories(fsr3lite SYSTEM PRIVATE third_party)
 target_link_libraries(fsr3lite PRIVATE PkgConfig::SDL2 PkgConfig::EPOXY Threads::Threads)
+if(WIN32)
+  # timeBeginPeriod/timeEndPeriod in src/present/frame_pacer.cpp.
+  target_link_libraries(fsr3lite PRIVATE winmm)
+endif()
 
 # Shaders are loaded from disk at runtime (hot reload), so the binary needs to
 # know where the source tree lives.

@@ -23,7 +23,8 @@ reference), a ne dojam.
 | M8 | inpainting, UI kompozicija, frame pacing, latencija | ✅ |
 | M9 | naučena mješavina (mala mreža u compute shaderima, vlastiti trener) | ✅ |
 
-**Gdje nastaviti:** [`docs/NASTAVAK.md`](docs/NASTAVAK.md).
+Svi moduli su gotovi. Povijest odluka i rezultata po modulu:
+[`docs/NASTAVAK.md`](docs/NASTAVAK.md).
 
 Brojke i ablacije po modulu su u `docs/` (vidi niže); agregirane tablice u
 `captures/metrics/summary.md`.
@@ -107,6 +108,10 @@ skripte: `check_gt.py` (provjera ground-truth dumpa), `compare_upscalers.py`
 U repozitoriju su CSV-ovi i Markdown tablice iz `captures/metrics/`; renderirane
 slike nisu — svaka skripta ih ponovno napravi.
 
+`captures/metrics/` je s NVIDIA RTX 5070; `captures/metrics-rx7800xt/` je isto
+mjerenje s AMD RX 7800 XT (Sapphire Nitro+, uz AMD Ryzen 7 5700X3D) na
+drugom stroju. Tablice u `docs/` koje uspoređuju kartice to i navode.
+
 ## Dokumentacija
 
 | | |
@@ -122,7 +127,7 @@ slike nisu — svaka skripta ih ponovno napravi.
 | [`docs/PACING.md`](docs/PACING.md) | M8: inpainting, UI, frame pacing, latencija |
 | [`docs/ML.md`](docs/ML.md) | M9: naučena mješavina |
 | [`docs/ML_KOMERCIJALNO.md`](docs/ML_KOMERCIJALNO.md) | poglavlje 3: komercijalna i istraživačka rješenja |
-| [`docs/NASTAVAK.md`](docs/NASTAVAK.md) | stanje i preostali posao |
+| [`docs/NASTAVAK.md`](docs/NASTAVAK.md) | povijest odluka i rezultata po modulu |
 
 ## Struktura
 

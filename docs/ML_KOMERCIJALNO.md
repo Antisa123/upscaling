@@ -1,7 +1,8 @@
 # Poglavlje 3 — komercijalna i istraživačka rješenja
 
 Pregled postojećih rješenja za upscaling i generiranje okvira, da se ovaj rad
-(FSR3-lite iz nule, RX 580, bez matričnih/tenzorskih jedinica) postavi u
+(FSR3-lite iz nule, namjerno prenosiv — OpenGL compute shaderi, bez
+vlasničkog matričnog/tenzorskog puta čak i na kartici koja ga ima) postavi u
 kontekst. Izvor su bilješke
 [`docs/reference/ml_commercial_notes.md`](reference/ml_commercial_notes.md)
 (engleski, s izvorima po tvrdnji). Gdje bilješke tvrdnju obilježavaju kao
@@ -58,8 +59,9 @@ naučeno generiranje okvira: mreža predviđa gibanje i izgled iz prethodnog i
 trenutnog okvira, dubine i vektora, „optičkim tokom plus vektorima", pa se to
 miješa s klasičnom reprojekcijom vektora — najbliže od AMD-ovih rješenja
 onome što M9 ovog rada radi (naučeno pravilo miješanja preko klasičnih
-kandidata), samo na hardveru koji RX 580 nema. Za RDNA 2 najavljeno je
-„rano 2027." (sekundarni izvor, nepotvrđeno).
+kandidata), samo na vlasničkom matričnom putu koji FSR3-lite namjerno ne
+koristi ni na kartici koja ga ima (`docs/ML.md`, „Isplati li se"). Za RDNA 2
+najavljeno je „rano 2027." (sekundarni izvor, nepotvrđeno).
 
 ## Intel XeSS
 
@@ -167,15 +169,19 @@ Puna tablica s izvorima (URL-ovi po retku) je u
 - **Arm NSS** je UNet koji predviđa jezgre za klasični akumulator — isti
   princip kao M9: mreža ne crta piksele nego bira/parametrizira između
   postojećih.
-- **DLSS 3/4, FSR 4/Redstone i PSSR** zahtijevaju ML akceleratore (Tensor
-  Cores, FP8/INT8, XMX). Za RX 580 AMD nema najavu. Mjerenja cijene u M9
-  (`docs/ML.md`, poglavlje „Cijena") pokazuju zašto: naučeni dio ovog rada
-  bez takvog hardvera nosi 2,7 ms po okviru na 1080p, dvostruko-do-trostruko
-  više od cijele klasične heuristike koju zamjenjuje.
+- **DLSS 3/4, FSR 4/Redstone i PSSR** zahtijevaju vlasnički matrični put
+  (Tensor Cores, FP8/INT8, XMX) — ne samo da hardver *ima* takve jedinice,
+  nego da ih softver stvarno koristi. Mjerenja cijene u M9 (`docs/ML.md`,
+  poglavlje „Cijena") pokazuju zašto to nije besplatno preskočiti: naučeni
+  dio ovog rada, namjerno pisan u prijenosnim OpenGL compute shaderima bez
+  takvog puta, nosi ~1,1 ms po okviru na 1080p čak i na kartici koja Tensor
+  Core jedinice ima (RTX 5070; 2,7 ms na starijoj RX 580), dvostruko-do-
+  -trostruko više od cijele klasične heuristike koju zamjenjuje.
 - **Sva komercijalna rješenja za generiranje okvira interpoliraju** (drže
   najnoviji okvir, pa trebaju Reflex / Anti-Lag 2 / XeLL). Isto radi i ovaj
-  rad, uz +8–16 ms latencije (`docs/PACING.md`). Jedina objavljena
-  ekstrapolacija, Reflex 2 Frame Warp, do srpnja 2026. nije izašla.
+  rad, uz dodatnu latenciju istog reda veličine (`docs/PACING.md`). Jedina
+  objavljena ekstrapolacija, Reflex 2 Frame Warp, do srpnja 2026. nije
+  izašla.
 - **UI** svi odvajaju od scene, kao i ovaj rad (M8).
 - **Istraživački modeli** (RIFE, FILM, EMA-VFI) rade samo iz RGB okvira, bez
   vektora i dubine, pa su za igre preskupi: RIFE ima 9,8 M parametara

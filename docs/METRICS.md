@@ -137,8 +137,8 @@ Prvih 16 frameova (`--warmup N`) se ne zapisuje u CSV. Dva razloga:
 1. Prsten timestamp upita treba tri framea prije nego dade ikakvu brojku, a
    reprojekcija treba prethodni frame.
 2. Prvi frameovi nose kompilaciju shadera, stvaranje pipeline objekata i prve
-   uploade tekstura. Na RX 580 je prvi frame reda 5–7 ms naspram 0,3 ms u
-   stacionarnom stanju.
+   uploade tekstura. Na NVIDIA RTX 5070 je prvi frame reda 2 ms naspram
+   0,38 ms u stacionarnom stanju.
 
 Zato `--frames 140` daje 124 retka.
 

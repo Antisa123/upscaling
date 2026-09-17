@@ -109,7 +109,8 @@ posvuda izvještavaju **srednja vrijednost, medijan i p95**, a ne samo srednja.
 
 ## Rezultati
 
-Mjerna orbita Sponze, RX 580, jedan vektor na 16×16 prikaznih piksela.
+Mjerna orbita Sponze, jedan vektor na 16×16 prikaznih piksela (kvaliteta ne
+ovisi o GPU-u).
 
 ### Ovisnost o brzini kamere
 
@@ -144,19 +145,21 @@ sat*, ne mirnu kameru; mirna kamera je `--fixed-dt 0.0000001` ili izostavljanje
 
 Ista orbita pri 60 fps, 104 okvira:
 
-| Konfiguracija | EPE sred. | medijan | p95 | unutar 1 px | GPU ms |
-|---|---|---|---|---|---|
-| 1280×720, render 854×480, FSR | 4.44 | 1.10 | 19.93 | 65.3 % | 1.43 |
-| 1080p, render 1280×720, FSR | 7.17 | 1.36 | 33.50 | 62.5 % | 2.71 |
-| 1080p native | 7.37 | 1.37 | 33.35 | 61.6 % | 3.47 |
-| 1080p, render 960×540, FSR | 6.94 | 1.40 | 33.36 | 61.2 % | 2.32 |
-| 4K, render 1920×1080, FSR | 13.75 | 1.64 | 71.13 | 59.8 % | 7.59 |
+| Konfiguracija | EPE sred. | medijan | p95 | unutar 1 px | GPU ms (RTX 5070) | GPU ms (RX 7800 XT) |
+|---|---|---|---|---|---|---|
+| 1280×720, render 854×480, FSR | 4.43 | 1.13 | 20.04 | 65.0 % | 0.40 | 0.36 |
+| 1080p, render 1280×720, FSR | 7.20 | 1.36 | 33.30 | 62.3 % | 0.71 | 0.64 |
+| 1080p native | 7.17 | 1.40 | 33.30 | 61.6 % | 0.91 | 0.86 |
+| 1080p, render 960×540, FSR | 7.10 | 1.42 | 34.68 | 61.0 % | 0.63 | 0.57 |
+| 4K, render 1920×1080, FSR | 13.71 | 1.62 | 73.40 | 59.6 % | 2.10 | 1.91 |
 
 Pogreška u pikselima raste s razlučivošću jer isti kut zakreta kamere znači
 više piksela; relativna točnost (udio blokova unutar 1 px) gotovo je konstantna.
 Vrijedno je i to da **upscaler ne šteti**: procjena iz 1080p rekonstruiranog iz
-720p jednako je dobra kao iz nativnog 1080p (7.17 vs 7.37). Tok se računa iz
-slike koju korisnik vidi, i ta slika je dovoljno dobra.
+720p jednako je dobra kao iz nativnog 1080p (7.20 vs 7.17). Tok se računa iz
+slike koju korisnik vidi, i ta slika je dovoljno dobra. Obje kartice slažu se
+u poretku i približnom omjeru cijene po razlučivosti; RX 7800 XT je dosljedno
+~10 % brži od RTX 5070 na ovom modulu.
 
 ## Ablacije
 
@@ -208,15 +211,16 @@ kadrove.
 
 ### Radijus pretrage (točnost naspram cijene)
 
-| Radijus | EPE sred. | medijan | p95 | GPU ms (cijeli okvir) |
-|---|---|---|---|---|
-| 2 | 8.48 | 1.47 | 37.43 | 2.61 |
-| 4 | 7.17 | 1.36 | 33.50 | 2.70 |
-| 6 | 6.67 | 1.33 | 30.60 | 2.83 |
-| 8 | 6.54 | 1.32 | 30.20 | 3.02 |
+| Radijus | EPE sred. | medijan | p95 | GPU ms, cijeli okvir (RTX 5070) | GPU ms, cijeli okvir (RX 7800 XT) |
+|---|---|---|---|---|---|
+| 2 | 8.42 | 1.45 | 36.72 | 0.65 | 0.60 |
+| 4 | 7.20 | 1.36 | 33.30 | 0.72 | 0.63 |
+| 6 | 6.40 | 1.34 | 30.53 | 0.77 | 0.66 |
+| 8 | 6.53 | 1.33 | 30.70 | 0.87 | 0.70 |
 
 Broj kandidata raste s (2R+1)², dobitak se gasi. Od 4 do 8 točnost se popravi
-za 9 % uz 46 % skuplji modul; 4 je koljeno i ostaje zadano.
+neznatno uz 21–33 % skuplji modul, dosljedno na obje kartice; 4 je koljeno i
+ostaje zadano.
 
 ### Glatkoća
 
@@ -312,27 +316,30 @@ tu zastavicu i koristi; detektor je za slučaj kad je nema.
 
 ## Cijena
 
-Sponza, RX 580, prosjek po okviru:
+Sponza, NVIDIA RTX 5070, prosjek po okviru:
 
 | Prolaz | 720p → 1080p | 1080p → 4K |
 |---|---|---|
-| OF luma + piramida | 0.108 | 0.391 |
-| OF histogram + presuda | 0.039 | 0.159 |
-| OF search/filter/upscale (7 razina) | 0.407 | 1.314 |
-| **Optical flow ukupno** | **0.558** | **1.872** |
-| za usporedbu: FSR accumulate | 0.676 | 2.692 |
-| za usporedbu: cijeli okvir | 2.680 | 7.662 |
+| OF luma + piramida | 0.03 | 0.08 |
+| OF histogram + presuda | 0.02 | 0.03 |
+| OF search/filter/upscale (7 razina) | 0.24 | 0.53 |
+| **Optical flow ukupno** | **0.29** | **0.65** |
+| za usporedbu: FSR accumulate | 0.15 | 0.65 |
+| za usporedbu: cijeli okvir | 0.68 | 1.87 |
 
-Po razinama (1080p → 4K, ms):
+Po razinama (ms, prosjek dva mjerenja na 720p → 1080p):
 
 | Razina | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
 |---|---|---|---|---|---|---|---|
-| 720p → 1080p | 0.026 | 0.018 | 0.018 | 0.018 | 0.029 | 0.070 | 0.228 |
-| 1080p → 4K | 0.028 | 0.019 | 0.019 | 0.030 | 0.074 | 0.240 | 0.905 |
+| 720p → 1080p | 0.03 | 0.02 | 0.01 | 0.03 | 0.02 | 0.04 | 0.09 |
+| 1080p → 4K | 0.02 | 0.01 | 0.01 | 0.02 | 0.03 | 0.09 | 0.35 |
 
-Najfinija razina je **41 %** cijene modula, a šest grubljih zajedno 0.179 ms,
-manje od trećine — što je i razlog zašto se broj razina ne isplati štedjeti.
-Ključna optimizacija u `of_search.comp` je stavljanje cijelog prozora pretrage u
+Na 4K najfinija razina i dalje jasno dominira (0,35 od 0,65 ms, 54 %), kao i
+na RX 580. Na 720p → 1080p su preostalih šest razina svaka ispod 0,04 ms —
+na ovom GPU-u to je blizu granice šuma mjerenja same GPU timer upita, pa im
+se međusobni omjer ne čita pouzdano; zbroj im je i dalje jasno manji od
+najfinije razine. Ključna optimizacija u `of_search.comp` je stavljanje
+cijelog prozora pretrage u
 dijeljenu memoriju prije evaluacije kandidata: naivno, prozor se pročita
 (2R+1)² puta, i to je razlika između prolaza ograničenog propusnošću i prolaza
 ograničenog ALU-om.

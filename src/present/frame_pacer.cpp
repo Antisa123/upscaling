@@ -4,6 +4,12 @@
 #include <cstdio>
 #include <string>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <timeapi.h>
+#endif
+
 namespace present {
 
 double FramePacer::nowMs() {
@@ -28,6 +34,17 @@ bool FramePacer::start(SDL_Window* window, SDL_GLContext presentContext, int wid
     // The textures must exist on the GPU before the other context wraps them.
     glFinish();
 
+#if defined(_WIN32)
+    // Windows' default scheduler tick is ~15.6 ms; sleep_for() in waitUntil()
+    // rounds up to it, so a half-period wait of a few milliseconds on a fast
+    // GPU actually sleeps for one tick -- periodMs_ then measures that
+    // oversleep on the very next pair and never recovers (there is no
+    // warm-up discard). 1 ms resolution is the standard fix (games do this
+    // too) and is process-wide, so it is requested once here and dropped in
+    // stop().
+    timeBeginPeriod(1);
+#endif
+
     stopping_ = false;
     started_ = 0;
     thread_ = std::thread(&FramePacer::run, this);
@@ -49,6 +66,9 @@ void FramePacer::stop() {
     }
     cv_.notify_all();
     thread_.join();
+#if defined(_WIN32)
+    timeEndPeriod(1);
+#endif
 }
 
 void FramePacer::destroy() {
@@ -58,18 +78,21 @@ void FramePacer::destroy() {
     }
 }
 
-int FramePacer::acquire() {
+int FramePacer::acquire(double* waitedMs) {
     std::unique_lock lock(mutex_);
+    const double start = nowMs();
     cv_.wait(lock, [&] { return !free_.empty(); });
+    if (waitedMs) *waitedMs = nowMs() - start;
     const int index = free_.back();
     free_.pop_back();
     return index;
 }
 
-void FramePacer::submit(int index, long long frame, bool interpolated, double sampleMs) {
+void FramePacer::submit(int index, long long frame, bool interpolated, double sampleMs,
+                         double renderMs) {
     std::unique_lock lock(mutex_);
     const long long id = ++submitted_;
-    queue_.push_back(Item{id, index, frame, interpolated, sampleMs, nowMs()});
+    queue_.push_back(Item{id, index, frame, interpolated, sampleMs, nowMs(), renderMs});
     cv_.notify_all();
     cv_.wait(lock, [&] { return staged_ >= id || started_ < 0; });
 }
@@ -118,7 +141,6 @@ void FramePacer::run() {
     }
     cv_.notify_all();
 
-    double lastReady = 0.0;
     for (;;) {
         Item item;
         {
@@ -134,18 +156,28 @@ void FramePacer::run() {
             appliedVsync = wantedVsync;
         }
 
-        // The render period is measured where it is defined: between two pairs
-        // becoming ready. A stall -- a shader reload, a window drag -- is not the
-        // frame rate, and letting it into the average would hold the next
-        // several real frames back by half of it.
-        if (lastReady > 0.0) {
-            const double period = item.readyMs - lastReady;
-            if (period > 0.0 && period < 250.0) {
-                const double p = periodMs_;
-                periodMs_ = p > 0.0 ? p + 0.1 * (period - p) : period;
-            }
+        // The render period is the render thread's own wall time for the
+        // frame (`renderMs`, measured in main's loop up to its glFinish()),
+        // not the gap between two ready timestamps here. The two used to be
+        // the same thing on the assumption that the render thread reaches
+        // acquire() and submit() without waiting on the presenter -- true on
+        // a GPU slow enough that render cost dominates, false on one fast
+        // enough that it doesn't. Once "paced" is waiting half a period
+        // between every pair, this thread only reaches the *next* pair's
+        // handoff after that wait, so the ready-to-ready gap measures the
+        // wait plus a fixed per-item overhead, not the render cost -- and
+        // periodMs_ built from that gap converges on whatever the first
+        // sample happened to be (startup shader compilation, typically),
+        // not on the true frame rate, and never corrects itself because
+        // every later sample is equally contaminated. `renderMs` is timed
+        // entirely on the render thread's side and does not depend on
+        // anything the presenter does, so it has no such loop. A stall (a
+        // shader reload, a window drag) is excluded the same as before.
+        const double period = item.renderMs;
+        if (period > 0.0 && period < 250.0) {
+            const double p = periodMs_;
+            periodMs_ = p > 0.0 ? p + 0.1 * (period - p) : period;
         }
-        lastReady = item.readyMs;
 
         double shown = 0.0;
         if (item.interpolated) {

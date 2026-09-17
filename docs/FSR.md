@@ -134,15 +134,26 @@ M5 se ponaša temporalno kao ground truth.
 
 ### Svi režimi skaliranja
 
-| Režim | Render | PSNR / SSIM | GPU ms | FPS (GPU) |
-|---|---|---|---|---|
-| NativeAA 1.0× | 1920×1080 | 38.16 / 0.9745 | 2.95 | 339 |
-| Quality 1.5× | 1280×720 | 35.48 / 0.9460 | 2.18 | 460 |
-| Balanced 1.7× | 1129×635 | 34.71 / 0.9339 | 2.01 | 497 |
-| Performance 2.0× | 960×540 | 33.74 / 0.9148 | 1.79 | 558 |
-| Ultra Performance 3.0× | 640×360 | 31.42 / 0.8535 | 1.43 | 701 |
+PSNR/SSIM je zajednički (kvaliteta ne ovisi o GPU-u, razlika je unutar šuma
+mjerenja između kartica); GPU ms i FPS su po kartici.
 
-U 4K (Performance 2.0×, render 1920×1080): 36.10 / 0.9491 uz 5.77 ms.
+| Režim | Render | PSNR / SSIM | GPU ms (RTX 5070) | FPS (RTX 5070) | GPU ms (RX 7800 XT) | FPS (RX 7800 XT) |
+|---|---|---|---|---|---|---|
+| NativeAA 1.0× | 1920×1080 | 38.14 / 0.9744 | 0.69 | 1459 | 0.66 | 1504 |
+| Quality 1.5× | 1280×720 | 35.47 / 0.9458 | 0.45 | 2232 | 0.48 | 2084 |
+| Balanced 1.7× | 1129×635 | 34.69 / 0.9335 | 0.40 | 2496 | 0.45 | 2247 |
+| Performance 2.0× | 960×540 | 33.72 / 0.9144 | 0.36 | 2788 | 0.42 | 2408 |
+| Ultra Performance 3.0× | 640×360 | 31.40 / 0.8530 | 0.32 | 3167 | 0.38 | 2631 |
+
+U 4K (Performance 2.0×, render 1920×1080): 36.10 / 0.9491 uz 1.28 ms na
+RTX 5070 (779 fps), 1.44 ms na RX 7800 XT (694 fps).
+
+Obje su kartice mnogo brže od RX 580, na kojem je ova tablica prvi put
+izmjerena (NativeAA 2.95 ms / 339 fps) — ali odnos između kartica nije
+ravnomjeran: RTX 5070 je brža na nižim skalama, a razlika se smanjuje ili
+okreće pri NativeAA. To se poklapa s FSR accumulate cijenom u odjeljku
+„Cijena" niže, koja ovisi o razlučivosti akumulacije, ne samo o generaciji
+GPU-a.
 
 NativeAA je slučaj u kojem omjer skaliranja iznosi 1:1 i upscaler radi kao čisti
 temporalni antialiasing — korisna gornja granica za ostale retke.
@@ -221,37 +232,42 @@ preporuka.
 
 ## Cijena
 
-Sponza, RX 580, prosjek po okviru:
+Sponza, NVIDIA RTX 5070, prosjek po okviru:
 
 | Prolaz | 720p → 1080p | 1080p → 4K |
 |---|---|---|
-| G-buffer | 0.91 | 1.65 |
-| Tonemap | 0.09 | 0.20 |
-| FSR dilate | 0.25 | 0.54 |
-| FSR locks | 0.06 | 0.13 |
-| FSR accumulate | 0.68 | 2.64 |
-| RCAS | 0.20 | 0.81 |
-| Present | 0.16 | 0.57 |
-| **Ukupno (bez RCAS-a)** | **2.15** | **5.73** |
-| za usporedbu: nativni okvir | 1.01 | 3.48 |
-| za usporedbu: M4 TAAU | 1.60 | — |
+| G-buffer | 0.16 | 0.31 |
+| Tonemap | 0.01 | 0.02 |
+| FSR dilate | 0.03 | 0.08 |
+| FSR locks | 0.01 | 0.03 |
+| FSR accumulate | 0.15 | 0.64 |
+| RCAS | 0.04 | 0.12 |
+| Present | 0.02 | 0.11 |
+| **Ukupno (bez RCAS-a)** | **0.38** | **1.19** |
+| za usporedbu: nativni okvir | 0.33 | 1.31 |
+| za usporedbu: M4 TAAU | 0.30 | — |
 
 Dvije stvari treba reći otvoreno:
 
-1. **G-buffer je poskupio s 0.79 na 0.91 ms** zbog dodatnog RG32F izlaza s
-   linearnim dubinama. To je cijena toga što je depth clip utemeljen na dokazu
-   umjesto na pogađanju, i plaća se u svakom okviru, dok se dobitak vidi samo na
-   disokluzijama. Za +0.13 dB u gibanju to je loš omjer; za `worst window` SSIM
-   i za ono što se vidi na rubovima nije.
-2. **Ni ovdje upscaler ne ubrzava.** Kao i u M4, Sponza s jednostavnim forward
-   shadingom nije dovoljno opterećena sjenčanjem da bi renderiranje u pola
-   površine pokrilo cijenu upscalera. Dobitak M5 je kvaliteta.
+1. **G-buffer je poskupio zbog dodatnog RG32F izlaza s linearnim dubinama**
+   (na RX 580, gdje je ovo prvi izmjereno, s 0,79 na 0,91 ms). To je cijena
+   toga što je depth clip utemeljen na dokazu umjesto na pogađanju, i plaća se
+   u svakom okviru, dok se dobitak vidi samo na disokluzijama. Za +0.13 dB u
+   gibanju to je loš omjer; za `worst window` SSIM i za ono što se vidi na
+   rubovima nije.
+2. **Na 1080p upscaler i dalje ne ubrzava** (0,38 naspram 0,33 ms nativno), a
+   na 4K ga blago pretekne (1,19 naspram 1,31 ms) — isti obrazac kao u M4
+   (`docs/TAAU.md`, Cijena): na bržem GPU-u fiksni troškovi rekonstrukcije
+   padnu relativno više od troška G-buffera. Sponza s jednostavnim forward
+   shadingom i dalje nije dovoljno opterećena sjenčanjem da bi to bio velik
+   dobitak; glavni dobitak M5 ostaje kvaliteta.
 
 ### Optimizacija koja nije upalila
 
 3×3 prozor statistike sadržan je u 4×4 Lanczos prozoru, pa se dvije petlje daju
-spojiti u 16 dohvata umjesto 25. Implementirano i izmjereno: **sporije**, 0.95 ms
-naspram 0.68 ms na 1080p. Test pripadnosti nije invarijantan po petlji (ovisi o
+spojiti u 16 dohvata umjesto 25. Implementirano i izmjereno: **sporije**, na
+RX 580 0,95 ms naspram 0,68 ms na 1080p. Test pripadnosti nije invarijantan po
+petlji (ovisi o
 pomaku koji se računa po pikselu), pa prevoditelj izgubi potpuno odmotanu
 sekvencu dohvata s konstantnim pomacima — a devet dodatnih čitanja iz keša
 jeftinije je od toga. Manje memorijskih operacija nije isto što i brže. Kod je

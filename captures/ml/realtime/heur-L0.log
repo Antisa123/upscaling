@@ -1,32 +1,36 @@
-[gl] AMD Radeon RX 580 Series (radeonsi, polaris10, ACO, DRM 3.64, 7.1.13-hardened1-2-hardened) | 4.6 (Core Profile) Mesa 26.2.2-arch1.1 | GLSL 4.60
+[gl:warn] Buffer performance warning: Buffer object 209 (bound to NONE, usage hint is GL_DYNAMIC_DRAW) is being copied/moved from VIDEO memory to HOST memory.
+[gl:warn] Buffer performance warning: Buffer object 210 (bound to NONE, usage hint is GL_DYNAMIC_DRAW) is being copied/moved from VIDEO memory to DMA CACHED memory.
+[gl:warn] Buffer performance warning: Buffer object 211 (bound to NONE, usage hint is GL_DYNAMIC_DRAW) is being copied/moved from VIDEO memory to DMA CACHED memory.
+[gl:warn] Buffer performance warning: Buffer object 209 (bound to NONE, usage hint is GL_DYNAMIC_DRAW) is being copied/moved from VIDEO memory to DMA CACHED memory.
+[gl] NVIDIA GeForce RTX 5070/PCIe/SSE2 | 4.6.0 NVIDIA 616.92 | GLSL 4.60 NVIDIA
 [gltf] assets/sponza/Sponza.gltf: 103 meshes, 103 instances, 25 textures
 [app] keys: 1-9 debug views | 0 interpolated frame | J jitter | P scripted path | V vsync | F1-F5 scaling mode | SPACE pause | F12 screenshot | ESC quit
 [app]       G frame generation | Y pacing | H HUD | T tear lines | [ ] synthetic load
-[gpu] G-buffer                   0.748 ms (last   0.752)
-[gpu] Tonemap                    0.083 ms (last   0.081)
-[gpu] FSR dilate                 0.247 ms (last   0.249)
-[gpu] FSR locks                  0.059 ms (last   0.059)
-[gpu] FSR accumulate             0.676 ms (last   0.680)
-[gpu] Optical flow               0.557 ms (last   0.557)
-[gpu] OF pyramid                 0.108 ms (last   0.109)
-[gpu] OF scene change            0.038 ms (last   0.039)
-[gpu] OF flow                    0.407 ms (last   0.407)
-[gpu] OF level 6                 0.026 ms (last   0.026)
-[gpu] OF level 5                 0.018 ms (last   0.018)
-[gpu] OF level 4                 0.018 ms (last   0.018)
-[gpu] OF level 3                 0.018 ms (last   0.018)
-[gpu] OF level 2                 0.029 ms (last   0.028)
-[gpu] OF level 1                 0.070 ms (last   0.069)
-[gpu] OF level 0                 0.228 ms (last   0.228)
-[gpu] Frame generation           1.830 ms (last   1.843)
-[gpu] FG interpolate             0.540 ms (last   0.549)
-[gpu] Present                    0.255 ms (last   0.256)
-[gpu] FG setup                   0.093 ms (last   0.093)
-[gpu] FG depth                   0.083 ms (last   0.084)
-[gpu] FG game vector field       0.305 ms (last   0.306)
-[gpu] FG flow vector field       0.252 ms (last   0.252)
-[gpu] FG disocclusion masks      0.160 ms (last   0.161)
-[gpu] FG image inpaint           0.234 ms (last   0.235)
-[gpu] TOTAL                      4.454 ms (last   4.478)
-[present] 2556 presents (1278 real, 1278 generated)  interval mean 3.080 ms (324.7 fps)  std 0.403 ms  p99 4.550 ms
-[present] latency sample -> real frame 9.07 ms   sample -> generated frame 5.95 ms
+[gpu] G-buffer                   0.172 ms (last   0.158)
+[gpu] Tonemap                    0.011 ms (last   0.011)
+[gpu] FSR dilate                 0.026 ms (last   0.027)
+[gpu] FSR locks                  0.013 ms (last   0.013)
+[gpu] FSR accumulate             0.155 ms (last   0.136)
+[gpu] Optical flow               0.267 ms (last   0.240)
+[gpu] OF pyramid                 0.024 ms (last   0.024)
+[gpu] OF scene change            0.018 ms (last   0.017)
+[gpu] OF flow                    0.223 ms (last   0.196)
+[gpu] OF level 6                 0.021 ms (last   0.020)
+[gpu] OF level 5                 0.013 ms (last   0.014)
+[gpu] OF level 4                 0.013 ms (last   0.014)
+[gpu] OF level 3                 0.036 ms (last   0.014)
+[gpu] OF level 2                 0.016 ms (last   0.016)
+[gpu] OF level 1                 0.034 ms (last   0.030)
+[gpu] OF level 0                 0.089 ms (last   0.088)
+[gpu] Frame generation           0.290 ms (last   0.280)
+[gpu] FG interpolate             0.065 ms (last   0.057)
+[gpu] Present                    0.047 ms (last   0.038)
+[gpu] FG setup                   0.012 ms (last   0.012)
+[gpu] FG depth                   0.011 ms (last   0.011)
+[gpu] FG game vector field       0.044 ms (last   0.044)
+[gpu] FG flow vector field       0.045 ms (last   0.048)
+[gpu] FG disocclusion masks      0.032 ms (last   0.028)
+[gpu] FG image inpaint           0.049 ms (last   0.048)
+[gpu] TOTAL                      0.982 ms (last   0.904)
+[present] 8664 presents (4332 real, 4332 generated)  interval mean 0.918 ms (1089.8 fps)  std 0.712 ms  p99 1.900 ms
+[present] latency sample -> real frame 1.98 ms   sample -> generated frame 1.75 ms

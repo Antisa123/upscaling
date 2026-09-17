@@ -1,15 +1,15 @@
-[gl] AMD Radeon RX 580 Series (radeonsi, polaris10, ACO, DRM 3.64, 7.1.13-hardened1-2-hardened) | 4.6 (Core Profile) Mesa 26.2.2-arch1.1 | GLSL 4.60
-[gltf] /home/matthew/Documents/Workspace/ante-galic/assets/sponza/Sponza.gltf: 103 meshes, 103 instances, 25 textures
+[gl] NVIDIA GeForce RTX 5070/PCIe/SSE2 | 4.6.0 NVIDIA 616.92 | GLSL 4.60 NVIDIA
+[gltf] C:/Users/Korisnik/Desktop/a/assets/sponza/Sponza.gltf: 103 meshes, 103 instances, 25 textures
 [app] keys: 1-9 debug views | 0 interpolated frame | J jitter | P scripted path | V vsync | F1-F5 scaling mode | SPACE pause | F12 screenshot | ESC quit
 [app]       G frame generation | Y pacing | H HUD | T tear lines | [ ] synthetic load
-[gpu] G-buffer                   0.760 ms (last   0.744)
-[gpu] Synthetic load             7.007 ms (last   6.935)
-[gpu] load G-buffer              0.578 ms (last   0.576)
-[gpu] Tonemap                    0.084 ms (last   0.083)
-[gpu] FSR dilate                 0.246 ms (last   0.245)
-[gpu] FSR locks                  0.058 ms (last   0.055)
-[gpu] FSR accumulate             0.681 ms (last   0.679)
-[gpu] Present                    0.128 ms (last   0.129)
-[gpu] TOTAL                      8.965 ms (last   8.871)
-[present] 703 presents (703 real, 0 generated)  interval mean 11.067 ms (90.4 fps)  std 1.403 ms  p99 17.286 ms
-[present] latency sample -> real frame 11.07 ms
+[gpu] G-buffer                   0.209 ms (last   0.160)
+[gpu] Synthetic load             4.063 ms (last   3.903)
+[gpu] load G-buffer              0.330 ms (last   0.326)
+[gpu] Tonemap                    0.015 ms (last   0.015)
+[gpu] FSR dilate                 0.042 ms (last   0.040)
+[gpu] FSR locks                  0.013 ms (last   0.013)
+[gpu] FSR accumulate             0.137 ms (last   0.137)
+[gpu] Present                    0.022 ms (last   0.022)
+[gpu] TOTAL                      4.502 ms (last   4.290)
+[present] 1563 presents (1563 real, 0 generated)  interval mean 5.066 ms (197.4 fps)  std 0.496 ms  p99 5.979 ms
+[present] latency sample -> real frame 5.24 ms

@@ -86,12 +86,18 @@ public:
     void destroy();
 
     // Blocks until a slot is free. The slot's textures belong to the caller
-    // until submit().
-    int acquire();
+    // until submit(). `waitedMs`, if given, is set to how long this call
+    // actually blocked (0 if a slot was already free) -- the caller
+    // subtracts it out of the wall time it passes to submit() as `renderMs`,
+    // since time spent waiting for the presenter is not render cost.
+    int acquire(double* waitedMs = nullptr);
     Slot& slot(int index) { return slots_[index]; }
     // The GPU work that filled the slot must be finished when this is called.
+    // `renderMs` is the render thread's own wall time for this frame, GPU
+    // execution included via glFinish(), with any acquire() wait already
+    // subtracted out by the caller -- this is what periodMs_ tracks.
     // Returns once the presenter has staged the slot (see above).
-    void submit(int index, long long frame, bool interpolated, double sampleMs);
+    void submit(int index, long long frame, bool interpolated, double sampleMs, double renderMs);
 
     void setPacing(PacingMode mode) { pacing_ = mode; }
     PacingMode pacing() const { return pacing_; }
@@ -115,6 +121,7 @@ private:
         bool interpolated = false;
         double sampleMs = 0.0;
         double readyMs = 0.0;
+        double renderMs = 0.0;
     };
 
     void run();

@@ -1,11 +1,14 @@
 # M9 — naučena mješavina za generiranje okvira
 
 Tema traži i naučenu komponentu. Pravi FSR3 je u cijelosti klasičan računalni
-vid; naučeni pristupi (DLSS, FSR4 „Redstone“) žive na hardveru s matričnim
-jedinicama, kojih RX 580 nema. M9 zato ne zamjenjuje jezgru nego mjeri jedno
-izolirano pitanje: **može li mala mreža, uz iste ulaze, bolje od ručne
-heuristike odlučiti kako spojiti kandidate koje klasični lanac već proizvodi —
-i koliko to košta na GPU-u bez podrške za tenzore.**
+vid; naučeni pristupi (DLSS, FSR4 „Redstone“) žive na hardveru s vlasničkim
+matričnim putom (Tensor Cores + cuDNN/TensorRT, XMX i sl.). FSR3-lite je, kao
+i pravi FSR3, namjerno pisan prenosivo — OpenGL 4.6 compute shaderi bez
+vlasničkog ML puta — pa M9 ne zamjenjuje jezgru nego mjeri jedno izolirano
+pitanje: **može li mala mreža, uz iste ulaze, bolje od ručne heuristike
+odlučiti kako spojiti kandidate koje klasični lanac već proizvodi — i koliko
+to košta kad se, namjerno, ne koristi tenzorska/matrična akceleracija, čak ni
+na kartici koja je ima.**
 
 Opcija (a) iz `PLAN.md` (Modul E): blend/inpainting maska, ne naučeni
 upsampling.
@@ -14,13 +17,14 @@ upsampling.
 i izvedena u compute shaderima, na svih osam mjernih pogleda podiže SSIM, a
 PSNR na sedam od osam, za +0,03 do +0,20 dB (1080p Quality: 35,00 → 35,10 dB).
 Dobitak je stabilan preko tri sjemena, ali malen, ne popravlja sustavno najgori
-okvir i ne prenosi se na neviđenu scenu. Plaća se 2,7 ms GPU-a po okviru na
-1080p (generiranje okvira 1,84 → 4,58 ms), što pri sintetskom opterećenju ×12
-spušta prikazani FPS s 147 na 120 i dodaje ~5 ms latencije. **Na ovom
-hardveru ne isplati se**: heuristika je 0,10 dB lošija za 40 % cijene
-generiranja okvira (1,84 naspram 4,58 ms). Vrijedi
-kao izmjeren odgovor na pitanje teme — gdje je granica malog naučenog modela
-bez tenzorskih jedinica — a ne kao zamjena jezgre.
+okvir i ne prenosi se na neviđenu scenu. Plaća se ~1,1 ms GPU-a po okviru na
+1080p (generiranje okvira 0,33 → 1,40 ms), što pri sintetskom opterećenju ×12
+spušta prikazani FPS s 329 na 290 i dodaje ~0,8 ms latencije. **Ni na kartici s
+Tensor Core jedinicama se ne isplati, jer ih naša implementacija namjerno ne
+koristi**: heuristika je 0,10 dB lošija za manje od četvrtine cijene
+generiranja okvira (0,33 naspram 1,40 ms). Vrijedi kao izmjeren odgovor na
+pitanje teme — gdje je granica malog naučenog modela bez vlasničke matrične
+akceleracije — a ne kao zamjena jezgre.
 
 ## Pokretanje
 
@@ -182,11 +186,13 @@ svaki patch s NaN/inf vrijednošću.
 
 ## Učenje
 
-Vlastiti trener, `tools/fg_train` (C++20, OpenMP, samo CPU), umjesto
-PyTorcha: RX 580 nema ROCm, projekt nema Python ovisnosti osim Pillowa, a
+Vlastiti trener, `tools/fg_train` (C++20, OpenMP, samo CPU), umjesto PyTorcha:
 model je dovoljno malen da su unaprijedni i povratni prolaz pet operacija
-nekoliko stotina linija petlji koje prevoditelj vektorizira. Posjedovanje obje
-strane omogućuje i da se provjere jedna naspram druge (niže).
+nekoliko stotina linija petlji koje prevoditelj vektorizira, pa vlastiti
+trener izbjegava Python ovisnost (projekt nema nijednu osim Pillowa) i,
+pišući obje strane u istom stilu, olakšava provjeru shadera naspram trenera
+bit po bit (niže) — s PyTorchem bi ta usporedba morala premostiti dva
+različita run-timea.
 
 | Postavka | Vrijednost |
 |---|---|
@@ -346,19 +352,19 @@ Svi Charbonnier, sjeme 1, 12 000 koraka (`scripts/ml_train.sh`).
 
 | Prolaz | c4-c8 | c8-c16 | c12-c24 |
 |---|---|---|---|
-| značajke + enc0 | 0,49 | 0,57 | 0,69 |
-| pool0 | 0,11 | 0,22 | 0,33 |
-| enc1 | 0,08 | 0,25 | 0,55 |
-| pool1 | 0,06 | 0,12 | 0,17 |
-| enc2 | 0,05 | 0,15 | 0,33 |
-| enc3 | 0,05 | 0,15 | 0,32 |
-| up1 + skip | 0,11 | 0,22 | 0,34 |
-| dec1 | 0,11 | 0,39 | 0,75 |
-| dec0 + mješavina | 0,57 | 0,68 | 0,78 |
-| **naučeni dio ukupno** | **1,62** | **2,75** | **4,28** |
-| **generiranje okvira** (heuristika 1,84) | 3,45 | 4,58 | 6,10 |
+| značajke + enc0 | 0,13 | 0,19 | 0,29 |
+| pool0 | 0,01 | 0,02 | 0,06 |
+| enc1 | 0,06 | 0,19 | 0,48 |
+| pool1 | 0,01 | 0,01 | 0,01 |
+| enc2 | 0,03 | 0,14 | 0,35 |
+| enc3 | 0,03 | 0,12 | 0,36 |
+| up1 + skip | 0,02 | 0,02 | 0,03 |
+| dec1 | 0,05 | 0,24 | 0,47 |
+| dec0 + mješavina | 0,13 | 0,14 | 0,17 |
+| **naučeni dio ukupno** | **0,48** | **1,07** | **2,22** |
+| **generiranje okvira** (heuristika 0,33) | 0,80 | 1,40 | 2,52 |
 
-Na 720p Quality c8-c16 košta 1,23 ms (generiranje okvira 0,83 → 2,06 ms).
+Na 720p Quality c8-c16 košta 0,52 ms (generiranje okvira 0,17 → 0,73 ms).
 
 Dva prolaza ne ovise o širini mreže: značajke i mješavina oba dohvaćaju sedam
 kandidata i dva vektorska polja po pikselu pune rezolucije, ukupno ~1,1 ms za
@@ -373,26 +379,35 @@ je i c4-c8 skoro dvostruko skuplji od cijele heuristike.
 
 | Opterećenje | bez FG | FG, heuristika | FG, mreža | latencija do pravog okvira (heur. / mreža) |
 |---|---|---|---|---|
-| ×0 | 344 fps | 325 fps | 215 fps | 9,1 / 13,8 ms |
-| ×12 | 90 fps | 147 fps | 120 fps | 20,2 / 25,0 ms |
-| ×24 | 55 fps | 93 fps | 84 fps | 32,0 / 35,6 ms |
+| ×0 | 1058 fps | 1090 fps | 708 fps | 2,0 / 3,0 ms |
+| ×12 | 199 fps | 329 fps | 290 fps | 6,2 / 7,0 ms |
+| ×24 | 116 fps | 209 fps | 188 fps | 9,7 / 10,8 ms |
 
-Uz opterećenje generiranje okvira s mrežom i dalje diže FPS (×12: +34 % naspram
-bez FG-a), ali heuristika ga diže gotovo dvostruko više (+64 %). Na neopterećenoj
-sceni mreža pomiče prag isplativosti: FG s njom gubi više od trećine FPS-a
-(344 → 215 fps), a heuristika 6 %.
+Uz opterećenje generiranje okvira s mrežom i dalje diže FPS (×12: +46 % naspram
+bez FG-a), ali heuristika ga diže više (+66 %). Na neopterećenoj sceni mreža
+pomiče prag isplativosti: FG s njom gubi gotovo trećinu FPS-a (1058 → 708 fps),
+dok heuristika na ovoj kartici nema trošak vidljiv u prikazanom FPS-u
+(1058 → 1090 fps) — na brzom GPU-u je stvarni okvir toliko jeftin da
+naizmjenično umetanje jeftinih generiranih okvira poveća broj prikaza, ne
+smanji ga; to je vidljivo tek kad je generirani okvir sam skup, kao kod mreže.
 
 ### Isplati li se
 
-Ne na RX 580, i to je izmjereno, a ne pretpostavljeno: +0,10 dB na 1080p
-Quality je razlika koju tablica vidi, a oko teško, dok je −19 % FPS-a pri ×12
-razlika koju igrač osjeti. Tri stvari to mogu promijeniti i sve tri su izvan
-ovog hardvera: tenzorske/matrične jedinice (cijena mreže bila bi mali dio
-2,7 ms), veći model (c12-c24 je najbolji i najskuplji, trend nije zasićen) i
-bogatiji kandidati (mreža ovdje ne može bitno bolje od najboljeg kandidata po
-pikselu; na validacijskim patchevima izabranog modela taj je limit 50,8 dB
-naspram 47,3 dB heuristike i 48,0 dB mreže). To je, u malom, argument zašto FSR4 i DLSS traže hardver koji
-FSR3 ne traži.
+Ne bitno bolje ni na kartici s Tensor Core jedinicama koje naša implementacija
+namjerno ne koristi, i to je izmjereno, a ne pretpostavljeno: +0,10 dB na
+1080p Quality je razlika koju tablica vidi, a oko teško, dok generiranje
+okvira raste s 0,33 na 1,40 ms i pri ×12 prikazani FPS pada s 329
+(heuristika) na 290 (mreža). Apsolutni trošak je niži nego na sporijem GPU-u
+(1,1 ms naspram nekadašnjih 2,7 ms), ali razlog nije nestao: FSR3-lite je
+namjerno pisan prenosivo, u općim OpenGL compute shaderima, pa `mat4`
+operacije mreže (`shaders/ml_conv.comp`) troše obične ALU jedinice, ne
+Tensor Core. Dvije stvari bi to mogle promijeniti, i obje su izvan ovog
+oblika implementacije: vlasnički matrični put (cijena mreže bila bi mali dio
+1,1 ms) i bogatiji kandidati (mreža ovdje ne može bitno bolje od najboljeg
+kandidata po pikselu; na validacijskim patchevima izabranog modela taj je
+limit 50,8 dB naspram 47,3 dB heuristike i 48,0 dB mreže). To je, u malom,
+razlog zašto DLSS, FSR4/Redstone i XeSS 2 FG zahtijevaju baš određeni
+vlasnički hardver, dok FSR3 (i FSR3-lite) rade posvuda.
 
 ## Demonstracija
 
@@ -424,8 +439,9 @@ heuristike, najveći dobitak i najveći gubitak mreže, po tri mjerna pogleda):
 
 Ako se prikaz težina (11) uključi usred izvođenja, varijanta shadera
 prevedena s `#define` i prvi put pokrenuta tek tada — s teksturom alociranom
-u istom okviru u kojem se prvi put i piše — pokvari taj okvir na Mesa/RX 580:
-26,6 dB umjesto 37,6 dB. Popravak je jedan program s uniformom
+u istom okviru u kojem se prvi put i piše — pokvarila je taj okvir na jednom
+razvojnom stroju (Mesa/AMD, Linux): 26,6 dB umjesto 37,6 dB. Popravak je
+jedan program s uniformom
 `uWriteWeights` umjesto dvije `#define`-varijante, i tekstura alocirana
 unaprijed (`fg_ml_blend.comp`, `MlBlend::ensure`), pa uključivanje prikaza
 usred izvođenja ne prevodi ništa novo niti prvi put piše u tek alociranu

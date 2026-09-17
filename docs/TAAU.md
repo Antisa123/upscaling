@@ -241,37 +241,44 @@ brzine bez vidljivog ghostinga.
 
 ## Cijena
 
-Sponza, RX 580, prosjek po okviru iz `GpuTimer`-a:
+Sponza, NVIDIA RTX 5070, prosjek po okviru iz `GpuTimer`-a:
 
 | Prolaz | 720p → 1080p | 1080p → 4K |
 |---|---|---|
-| G-buffer | 0.79 | 1.37 |
-| Tonemap | 0.09 | 0.20 |
-| TAAU | 0.42 | 1.64 |
-| RCAS | 0.20 | 0.81 |
-| Present | 0.18 | 0.57 |
-| **Ukupno TAAU + RCAS** | **1.68** | **4.59** |
-| za usporedbu: nativni okvir | 1.01 | 3.48 |
+| G-buffer | 0.18 | 0.34 |
+| Tonemap | 0.01 | 0.02 |
+| TAAU | 0.09 | 0.39 |
+| RCAS | 0.04 | 0.13 |
+| Present | 0.02 | 0.09 |
+| **Ukupno TAAU + RCAS** | **0.34** | **0.98** |
+| za usporedbu: nativni okvir | 0.33 | 1.31 |
 
-**Na ovoj sceni upscaler nije brži od nativnog renderiranja, i to treba reći
-otvoreno.** Sponza s jednostavnim forward shadingom na RX 580 nije dovoljno
-opterećena sjenčanjem: cijeli nativni okvir u 4K traje 3.48 ms, a samo TAAU
-prolaz u istoj razlučivosti 1.64 ms. Ušteda od renderiranja u pola površine
-(3.48 → 1.37 ms G-buffera) nije dovoljna da pokrije upscaler.
+**Na ovoj sceni je upscaler otprilike izjednačen s nativnim renderiranjem na
+1080p (0,34 naspram 0,33 ms), a na 4K ga pretekne (0,98 naspram 1,31 ms).**
+Sponza s jednostavnim forward shadingom nije dovoljno opterećena sjenčanjem
+da bi ušteda bila velika, ali na ovom GPU-u je barem pozitivna na 4K — na
+sporijem RX 580 to nije bio slučaj (nativni 4K okvir 3,48 ms naspram 4,59 ms
+za cijeli TAAU+RCAS pipeline): fiksni troškovi rekonstrukcije (dilate,
+lockovi, RCAS, present) su na bržem GPU-u pali relativno više nego trošak
+G-buffera, pa se ušteda od manje render-rezolucije sad probije kroz. Zaključak
+o pragu isplativosti (točka 1 niže) time nije opovrgnut, samo pomaknut: na
+ovoj sceni prag postoji negdje između ova dva GPU-a, ne kod oba jednako.
 
 To je očekivano i ne mijenja svrhu M4 — dobitak je ovdje **kvaliteta**
 (+4.56 dB, bolji SSIM na svim brzinama) — ali postavlja dvije stvari za
 kasnije:
 
 1. Prag isplativosti traži shading-bound scenu. G-buffer ovdje skalira
-   podlinearno s površinom (0.49 ms na 720p → 1.01 ms na 1080p), dakle
-   dobrim dijelom je vezan geometrijom, koju niža razlučivost ne pojeftinjuje.
-2. 1.64 ms za TAAU u 4K je previše za jedan prolaz. Optimizacija — fp16 gdje
+   podlinearno s površinom (0,19 ms na 720p → 0,47 ms na 1080p, samo
+   renderiranje bez upscalera), dakle dobrim dijelom je vezan geometrijom,
+   koju niža razlučivost ne pojeftinjuje.
+2. 0,39 ms za TAAU u 4K je i dalje velik dio ukupnog budžeta okvira na bilo
+   kojem GPU-u. Optimizacija — fp16 gdje
    ima smisla, `textureGather` umjesto pojedinačnih dohvata, spajanje
    Catmull-Rom dohvata — je dio M5, zajedno s ostatkom punog upscalera.
 
-Referentni prolazi (`ref: GT native` 2.75 ms, `ref: GT downsample` 0.64 ms,
-`ref: GT tonemap` 0.19 ms na 1080p) postoje samo u `--validate-upscale` načinu
+Referentni prolazi (`ref: GT native` 2.69 ms, `ref: GT downsample` 0.07 ms,
+`ref: GT tonemap` 0.02 ms na 1080p) postoje samo u `--validate-upscale` načinu
 i `gfx::GpuTimer` ih po prefiksu `ref: ` isključuje iz zbroja, pa ne ulaze ni u
 tablicu ni u FPS.
 

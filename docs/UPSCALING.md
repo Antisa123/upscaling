@@ -91,8 +91,12 @@ latica ograničena preostalim prostorom do crne i do bijele, skalirana s
 ## Rezultati
 
 Puna tablica: `captures/metrics/summary.md` (`scripts/run_metrics.py
---group upscale rcas`). Mjereno na RX 580 (Mesa), 120 frameova, skriptirana
-kamera, fiksni korak, bez jittera.
+--group upscale rcas`). Mjereno na NVIDIA RTX 5070, 120 frameova, skriptirana
+kamera, fiksni korak, bez jittera. Kvaliteta (PSNR/SSIM) ne ovisi o GPU-u;
+brojke vremena/cijene niže jesu za ovu karticu i niže su nego u ranijim
+mjerenjima na RX 580. Isto mjerenje s AMD RX 7800 XT je u
+`captures/metrics-rx7800xt/summary.md`; tablice cijene niže u ovom
+dokumentu navode obje kartice gdje je razlika izmjerena.
 
 > Brojke u ovom dokumentu su regenerirane nakon M4. Referenca je od tada
 > **supersamplirana** (`--gt-ss 2`) i render prolaz koristi negativni LOD bias
@@ -159,30 +163,46 @@ bicubic oštriji ali sa stepenicama na luku, FSR1 najbliži nativnom renderu.
 
 ### Cijena
 
+Mjereno na NVIDIA RTX 5070; RX 580 brojke (izmjerene prve, sporiji GPU) su u
+zagradama gdje su različite.
+
 | Pass | 1080p izlaz | 4K izlaz |
 |---|---|---|
-| Nativni render (cijeli okvir) | 1,01 ms | 3,48 ms |
-| G-buffer na 1/2 površine | 0,38 ms | 1,19 ms |
-| Tone mapping | 0,09 ms | 0,20 ms |
-| EASU | 0,33 ms | 1,29 ms |
-| RCAS | 0,20 ms | 0,81 ms |
-| Present | 0,19 ms | 0,57 ms |
-| **Ukupno FSR1 pri 2,0×** | **1,14 ms** | **3,98 ms** |
+| Nativni render (cijeli okvir) | 0,33 ms (1,01) | 1,31 ms (3,48) |
+| G-buffer na 1/2 površine | 0,10 ms (0,38) | 0,32 ms (1,19) |
+| Tone mapping | 0,01 ms (0,09) | 0,02 ms (0,20) |
+| EASU | 0,07 ms (0,33) | 0,27 ms (1,29) |
+| RCAS | 0,03 ms (0,20) | 0,11 ms (0,81) |
+| Present | 0,02 ms (0,19) | 0,10 ms (0,57) |
+| **Ukupno FSR1 pri 2,0×** | **0,23 ms (1,14)** | **0,82 ms (3,98)** |
 
-Ovo je neugodan, ali iskren rezultat: na ovoj sceni **FSR1 ne ubrzava ništa**.
-Cijena upscalera je fiksna i vezana za *izlaznu* razlučivost, a ušteda je
-vezana za *ulaznu*. Sponza se na RX 580 renderira u ~1 ms pri 1080p, pa
-ušteda od 0,63 ms ne može platiti 0,52 ms EASU+RCAS-a plus tone mapping i
-skuplji Present. Bilinear pri 2,0× jest brži od nativnog (0,62 ms naspram
-1,01 ms), jer gotovo ništa ne košta.
+Na RX 580 je ovo bio neugodan, ali iskren rezultat: **FSR1 nije ubrzavao
+ništa** (cijena upscalera fiksna je i vezana za *izlaznu* razlučivost, a
+ušteda za *ulaznu*, i na toj sceni/tom GPU-u ušteda nije mogla platiti EASU +
+RCAS + tone mapping + skuplji Present). Na RTX 5070 se odnos okrenuo: FSR1
+je brži od nativnog na obje razlučivosti (0,23 naspram 0,33 ms; 0,82 naspram
+1,31 ms), jer su EASU i RCAS — kompaktni, ALU-vezani compute prolazi —
+generacijski poskupjeli manje od G-buffera (geometrijski/fiksno-funkcijski
+vezanog), pa se ušteda od manje render-površine sad probije kroz. Bilinear
+pri 2,0× je i dalje brži od FSR1 na oba GPU-a (gotovo ništa ne košta), ali
+razlika prema nativnom više nije jednosmjerna kao na RX 580.
+
+Ukupno (bez razlaganja po prolazu — iz `captures/metrics-rx7800xt/summary.md`,
+druga metodologija: agregatni `GpuTimer` kroz 104 okvira, ne pojedinačni
+prolazi ovdje) je AMD RX 7800 XT na ovoj sceni bliže RTX 5070 nego RX 580:
+FSR1 je 0,26 ms na 1080p izlazu (nativno 0,36 ms) i 1,10 ms na 4K izlazu
+(nativno 1,82 ms) — isti smjer zaključka kao na RTX 5070, upscaler je brži
+od nativnog na obje razlučivosti, s vrlo sličnim omjerom ubrzanja.
 
 Dva zaključka za rad:
 
 1. Mjerenje ubrzanja traži scenu čija je cijena renderiranja usporediva s
-   pravim opterećenjem, a ne demo koja se vrti na 1000 FPS. Ovo je stvarno
-   ograničenje mjerne postavke i tako će biti i navedeno.
-2. Naša EASU izvedba (1,29 ms pri 4K na RX 580) je u fp32, skalarna, s 12
-   `texelFetch` poziva. Referentna koristi pakirani fp16 i `gather4`. To je
+   pravim opterećenjem, a ne demo koja se vrti na 1000 FPS — i, kako ovaj par
+   mjerenja pokazuje, treba navesti i na kojem je GPU-u mjereno, jer se
+   zaključak o ubrzanju mijenja s hardverom čak i uz identičnu scenu.
+2. Naša EASU izvedba (0,27 ms pri 4K na RTX 5070, 1,29 ms na RX 580) je u
+   fp32, skalarna, s 12 `texelFetch` poziva. Referentna koristi pakirani fp16
+   i `gather4`. To je
    konkretan cilj optimizacije za M5, ne nedostatak algoritma.
 
 ### Zašto ovo motivira M4

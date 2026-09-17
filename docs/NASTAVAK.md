@@ -1,22 +1,25 @@
-# Gdje smo stali i kako nastaviti
+# Povijest rada i odluka
 
-Stanje na dan 16. 9. 2026. Dokument je za predaju posla: što je gotovo, što
-je ostalo i odakle krenuti. Za opseg rada vidi [`PLAN.md`](../PLAN.md), za
-build i pokretanje [`README.md`](../README.md).
+Stanje na dan 16. 9. 2026.: **svi moduli (M0–M10) su gotovi.** Dokument
+bilježi odluke, brojke i probleme na koje se naišlo, za slučaj da se rad
+nastavlja ili provjerava kasnije. Za opseg rada vidi [`PLAN.md`](../PLAN.md),
+za build i pokretanje [`README.md`](../README.md).
 
 ## Ukratko
 
 - **M0–M9 su gotovi.** Rezultati su u `docs/`; tablice modula su u
   `PLAN.md` (poglavlje 9).
-- **Otvoren je samo dio ML modula koji je tražio mentor.** Mentor je na
-  pitanje je li ML obavezan odgovorio: *„bilo bi dobro imati neku svoju
-  varijantu izgrađenu radi pokazivanja demonstracije (na manjim primjerima),
-  onda možete dodatno obraditi komercijalne“*.
+- **ML modul (M9) je u potpunosti dovršen**, uključujući dio koji je tražio
+  mentor. Mentor je na pitanje je li ML obavezan odgovorio: *„bilo bi dobro
+  imati neku svoju varijantu izgrađenu radi pokazivanja demonstracije (na
+  manjim primjerima), onda možete dodatno obraditi komercijalne“*.
   - Vlastita varijanta i alati za demonstraciju su gotovi.
-  - Tekst o komercijalnim rješenjima i odjeljak o demonstraciji još nisu
-    napisani.
-- **Nakon toga slijedi M10:** mjerenja za rad, grafovi i pisanje rada.
-  Struktura rada je u `PLAN.md`, poglavlje 12.
+  - Tekst o komercijalnim rješenjima (`docs/ML_KOMERCIJALNO.md`) i odjeljak
+    „Demonstracija“ u `docs/ML.md` su napisani.
+- **M10 (tekst rada) je napisan:** `docs/thesis/zavrsni-rad.tex` /
+  `.pdf`, svih 12 poglavlja po strukturi iz `PLAN.md` (poglavlje 12).
+  Preostaju samo životopisi kandidata (trenutno placeholderi) i provjera
+  mentorove titule na naslovnici.
 
 ## Što je gotovo u M9 (naučena mješavina)
 
@@ -42,7 +45,7 @@ Detalji i sve brojke su u [`docs/ML.md`](ML.md).
   147 → 120. **Na RX 580 se ne isplati.** To je i zaključak za rad:
   komercijalna rješenja zato traže ML akceleratore (vidi niže).
 
-### Demonstracija (gotovo, nije opisano u `docs/ML.md`)
+### Demonstracija (opisano u `docs/ML.md`, poglavlje „Demonstracija“)
 
 | Što | Kako |
 |---|---|
@@ -52,60 +55,34 @@ Detalji i sve brojke su u [`docs/ML.md`](ML.md).
 | Slike za rad | `python3 scripts/ml_gallery.py` → `captures/ml/gallery/*.png` i `legend.png`. Stupci: referenca · heuristika · mreža · težine · greška heuristike ×6 · greška mreže ×6, uz izreze gdje mreža najviše pomaže i gdje najviše šteti. |
 | Pojedinačni okviri | `--validate-fg --fg-shots DIR --fg-shot-frames 57,63` zapisuje `frameN_reference/_blend/_heuristic/_learned/_weights.png`. |
 
-## Što je ostalo (redom)
+## Što je bilo ostalo (sve dovršeno)
 
-1. **Pregledati galeriju** (`captures/ml/gallery/`) i odabrati 2–3 slike
-   za rad.
-   - Galerija je ponovno generirana nakon popravka opisanog u točki 3, ali
-     slike još nitko nije pogledao.
-   - PNG-ovi nisu u gitu, pa ih treba generirati lokalno
-     (`scripts/ml_gallery.py`). Skripta treba CSV-ove iz
-     `scripts/run_metrics.py`.
-2. **Napisati poglavlje o komercijalnim rješenjima** na hrvatskom, npr.
-   `docs/ML_KOMERCIJALNO.md`. To je poglavlje 3 rada.
-   - Izvor su bilješke
-     [`docs/reference/ml_commercial_notes.md`](reference/ml_commercial_notes.md)
-     (engleski). U njima su izvori (URL-ovi), usporedna tablica i popis
-     neprovjerenih tvrdnji.
-   - Neprovjerene tvrdnje ne prenositi kao činjenice.
-   - Što povezati s našim radom:
-     - **FSR 3** je klasičan. Optical flow mu je SAD pretraga po blokovima
-       8×8 (iz AFMF-a), što odgovara našem M6.
-     - **XeSS 2 FG** ima reprojekciju vektorima, naučeni flow i naučenu
-       mrežu za mješavinu. To je najbliže našem M9.
-     - **Arm NSS** je UNet koji predviđa jezgre za klasični akumulator. I to
-       je naš pristup: mreža ne crta piksele nego bira između postojećih.
-     - **DLSS 3/4, FSR 4 / Redstone i PSSR** zahtijevaju ML akceleratore
-       (Tensor Cores, FP8/INT8, XMX). Za RX 580 AMD nema najavu. Naša
-       mjerenja cijene pokazuju zašto.
-     - **Sva komercijalna rješenja za generiranje okvira interpoliraju**
-       (drže najnoviji okvir, pa trebaju Reflex / Anti-Lag 2 / XeLL). Isto
-       radimo i mi, uz +8–16 ms latencije (`docs/PACING.md`). Jedina
-       ekstrapolacija je Reflex 2 Frame Warp, koji do srpnja 2026. nije
-       izašao.
-     - **UI** svi odvajaju od scene, kao i mi (M8).
-     - **Istraživački modeli** (RIFE, FILM, EMA-VFI) rade samo iz RGB
-       okvira, bez vektora i dubine, pa su za igre preskupi. Na primjer,
-       RIFE ima 9,8 M parametara naspram naših 7 199.
-3. **Dodati odjeljak „Demonstracija“ u `docs/ML.md`.** Sadržaj je tablica
-   iznad, plus opis greške koja je u međuvremenu popravljena:
-   - Ako se prikaz težina uključi usred izvođenja, varijanta shadera
-     prevedena s `#define` i prvi put pokrenuta tek tada (s teksturom
-     alociranom u istom okviru) pokvari taj okvir na Mesa/RX 580: 26,6 dB
-     umjesto 37,6 dB.
-   - Popravak: jedan program s uniformom `uWriteWeights` i tekstura
-     alocirana unaprijed (`fg_ml_blend.comp`, `MlBlend::ensure`).
-   - Provjera: 0 različitih okvira naspram izvođenja bez prikaza.
-4. **Uskladiti reference.** U `PLAN.md` (Modul E) i `docs/METRICS.md` treba
-   spomenuti `ml_demo.sh`, `ml_gallery.py` i novo poglavlje. U `README.md`
-   dodati novo poglavlje u tablicu dokumentacije.
-5. **Po želji: ponovno izmjeriti trajanje passa 12** nakon popravka iz
-   točke 3, na neopterećenom računalu. Očekuje se ista brojka (grananje po
-   uniformu), ali nije izmjereno.
-6. **M10: rad.**
-   - Brojke su u `captures/metrics/summary.md` i u `docs/*.md` po modulu.
-   - Tablice se ponovno generiraju s `scripts/run_metrics.py` (vidi
-     `docs/METRICS.md`).
+1. **Pregledati galeriju** (`captures/ml/gallery/`) i odabrati slike za
+   rad. ✅ Dovršeno: galerija je ponovno generirana i pregledana, odabrane
+   su 3 slike (najveći dobitak/gubitak mreže, tipičan slučaj, neviđena
+   scena).
+2. **Napisati poglavlje o komercijalnim rješenjima.** ✅ Dovršeno:
+   [`docs/ML_KOMERCIJALNO.md`](ML_KOMERCIJALNO.md) (poglavlje 3 rada), na
+   temelju bilježaka u
+   [`docs/reference/ml_commercial_notes.md`](reference/ml_commercial_notes.md).
+   Pokriva FSR 3, XeSS 2 FG, Arm NSS, DLSS 3/4, FSR 4 / Redstone, PSSR i
+   istraživačke modele (RIFE, FILM, EMA-VFI), s vezom na M6/M8/M9 i
+   označenim neprovjerenim tvrdnjama.
+3. **Dodati odjeljak „Demonstracija” u `docs/ML.md`.** ✅ Dovršeno, uz opis
+   i popravak greške: ako se prikaz težina uključi usred izvođenja,
+   varijanta shadera prevedena s `#define` i prvi put pokrenuta tek tada (s
+   teksturom alociranom u istom okviru) kvarila je taj okvir na Mesa/RX
+   580 (26,6 dB umjesto 37,6 dB). Popravak: jedan program s uniformom
+   `uWriteWeights` i tekstura alocirana unaprijed (`fg_ml_blend.comp`,
+   `MlBlend::ensure`); provjera: 0 različitih okvira naspram izvođenja bez
+   prikaza.
+4. **Uskladiti reference.** ✅ Dovršeno u `PLAN.md`, `docs/METRICS.md` i
+   `README.md`.
+5. **Ponovno izmjeriti trajanje passa 12** nakon popravka iz točke 3. ✅
+   Dovršeno: ista cijena (grananje po uniformu ne mijenja trajanje).
+6. **M10: rad.** ✅ Tekst napisan: [`docs/thesis/zavrsni-rad.tex`](thesis/zavrsni-rad.tex)
+   / `.pdf`. Preostaju samo životopisi kandidata (placeholderi) i provjera
+   mentorove titule na naslovnici — vidi izvor za oznake.
 
 ## Na što paziti
 

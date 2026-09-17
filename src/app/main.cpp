@@ -1077,6 +1077,10 @@ int main(int argc, char** argv) {
         }
 
         const Uint64 cpuStart = SDL_GetPerformanceCounter();
+        // For the pacer's period estimate (see frame_pacer.cpp): wall time
+        // for this thread's own work, GPU execution included via the
+        // glFinish() below, but not the presenter handoff that follows it.
+        const double workStartMs = present::FramePacer::nowMs();
 
         // The scene-change readback is two frames behind the GPU, so the CSV
         // has to say whether a cut happened on the frame the readback is
@@ -1481,7 +1485,8 @@ int main(int argc, char** argv) {
         // M8: hand the frame to the presenter. Blocks while every slot is still
         // in flight -- the presenter is behind, and rendering further ahead
         // would only add latency.
-        const int slotIndex = pacer.acquire();
+        double acquireWaitMs = 0.0;
+        const int slotIndex = pacer.acquire(&acquireWaitMs);
         present::Slot& slot = pacer.slot(slotIndex);
         // The generated frame is shown only on the plain view, and not on a
         // reset, where the module hands back a copy of the current frame: that
@@ -1563,7 +1568,11 @@ int main(int argc, char** argv) {
         // No fence: see frame_pacer.h. The render thread waits for its own GPU
         // work here, so "ready" in the present log is when the frame was done.
         glFinish();
-        pacer.submit(slotIndex, frameCounter, showInterpolated, sampleMs);
+        // Time spent blocked in acquire() is the presenter's backlog, not
+        // render cost; it is left out so periodMs_ cannot end up tracking
+        // its own pacing wait (see frame_pacer.cpp).
+        const double renderMs = present::FramePacer::nowMs() - workStartMs - acquireWaitMs;
+        pacer.submit(slotIndex, frameCounter, showInterpolated, sampleMs, renderMs);
         drainPresents();
 
         ++frameCounter;

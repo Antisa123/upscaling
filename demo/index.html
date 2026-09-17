@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FSR3-lite — demo upscalinga</title>
+<meta name="description" content="Vizualna i mjerna usporedba render rezolucije, prostorno/temporalno upscaliranog izlaza i native reference u vlastitom FSR3-lite upscaleru.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0a0e12;
+    --bg-raised: #10161c;
+    --bg-inset: #060909;
+    --line: #1f2a33;
+    --line-soft: #161e25;
+    --text: #e9eef2;
+    --text-dim: #97a6b0;
+    --text-faint: #5c6b75;
+    --accent: #57d9c7;
+    --accent-dim: #2c5852;
+    --accent-ink: #04211d;
+    --warn: #e8a23d;
+    --bar: #263440;
+    --bar-highlight: #57d9c7;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  }
+  *{ box-sizing: border-box; }
+  html{ background: var(--bg); }
+  body{
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  img{ max-width: 100%; display: block; }
+  a{ color: var(--accent); text-decoration: none; }
+  a:hover{ text-decoration: underline; }
+  .wrap{ max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+
+  /* ---- top bar ---- */
+  header.top{
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(10,14,18,.86);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  header.top .wrap{
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+  }
+  .brand{ display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 14px; color: var(--text); }
+  .brand .dot{ width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .top nav{ display: flex; gap: 22px; font-size: 13px; font-family: var(--mono); }
+  .top nav a{ color: var(--text-dim); }
+  .top nav a:hover{ color: var(--accent); text-decoration: none; }
+
+  /* ---- hero ---- */
+  .hero{ padding: 64px 0 40px; border-bottom: 1px solid var(--line-soft); }
+  .eyebrow{
+    font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 14px;
+  }
+  h1{
+    font-size: clamp(30px, 4.6vw, 46px); line-height: 1.08; margin: 0 0 18px;
+    font-weight: 600; letter-spacing: -0.01em; text-wrap: balance;
+  }
+  h1 em{ color: var(--accent); font-style: normal; }
+  .lede{ font-size: 17px; color: var(--text-dim); max-width: 62ch; margin: 0 0 26px; }
+  .stat-row{ display: flex; flex-wrap: wrap; gap: 10px; }
+  .stat-chip{
+    font-family: var(--mono); font-size: 12.5px; color: var(--text-dim);
+    border: 1px solid var(--line); background: var(--bg-raised);
+    border-radius: 6px; padding: 7px 11px;
+  }
+  .stat-chip b{ color: var(--text); font-weight: 600; }
+
+  section{ padding: 56px 0; border-bottom: 1px solid var(--line-soft); }
+  section:last-of-type{ border-bottom: none; }
+  .section-head{ margin: 0 0 8px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .section-head .idx{ font-family: var(--mono); color: var(--text-faint); font-size: 13px; }
+  h2{ font-size: 24px; margin: 0; font-weight: 600; letter-spacing: -.005em; }
+  .section-sub{ color: var(--text-dim); max-width: 68ch; margin: 8px 0 30px; font-size: 15px; }
+
+  /* ---- comparison viewer ---- */
+  .viewer{
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg-inset);
+  }
+  .viewer-frame{
+    position: relative; aspect-ratio: 16/9; background: #000;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .viewer-frame img{
+    width: 100%; height: 100%; object-fit: contain; object-position: center;
+  }
+  .viewer-frame img.pixelated{ image-rendering: pixelated; image-rendering: crisp-edges; }
+  .viewer-badge{
+    position: absolute; top: 12px; left: 12px;
+    font-family: var(--mono); font-size: 12px; color: var(--text);
+    background: rgba(6,9,9,.78); border: 1px solid var(--line);
+    padding: 6px 10px; border-radius: 6px; display: flex; gap: 10px;
+  }
+  .viewer-badge span.res{ color: var(--accent); }
+  .viewer-metrics{
+    position: absolute; bottom: 12px; right: 12px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+    background: rgba(6,9,9,.78); border: 1px solid var(--line);
+    padding: 8px 10px; border-radius: 6px; text-align: right; line-height: 1.6;
+  }
+  .viewer-metrics b{ color: var(--text); }
+  .viewer-tabs{
+    display: flex; border-top: 1px solid var(--line); background: var(--bg-raised);
+  }
+  .viewer-tabs button{
+    flex: 1; appearance: none; border: none; background: transparent; color: var(--text-dim);
+    font-family: var(--mono); font-size: 13px; padding: 13px 10px; cursor: pointer;
+    border-right: 1px solid var(--line); transition: color .15s, background .15s;
+  }
+  .viewer-tabs button:last-child{ border-right: none; }
+  .viewer-tabs button:hover{ color: var(--text); background: var(--bg-inset); }
+  .viewer-tabs button.active{ color: var(--accent-ink); background: var(--accent); font-weight: 600; }
+  .viewer-tabs button small{ display: block; font-weight: 400; opacity: .8; font-size: 11px; margin-top: 2px; }
+  .viewer-tabs button.active small{ opacity: .75; }
+
+  .viewer-caption{ font-size: 13px; color: var(--text-faint); margin-top: 12px; }
+
+  /* ---- crop mosaic ---- */
+  .mosaic{ border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg-inset); }
+  .mosaic img{ width: 100%; }
+  .mosaic-caption{ font-size: 13px; color: var(--text-faint); margin-top: 12px; }
+
+  /* ---- charts ---- */
+  .chart-grid{ display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  @media (max-width: 760px){ .chart-grid{ grid-template-columns: 1fr; } }
+  .chart-card{ border: 1px solid var(--line); border-radius: 10px; background: var(--bg-raised); padding: 22px 22px 10px; }
+  .chart-card h3{ font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+  .chart-card .chart-unit{ font-size: 12px; color: var(--text-faint); font-family: var(--mono); margin: 0 0 16px; }
+  .chart-card svg{ width: 100%; height: auto; overflow: visible; }
+  .bar-row rect.track{ fill: var(--bar); }
+  .bar-row rect.fill{ fill: var(--bar-highlight); }
+  .bar-row rect.fill.dim{ fill: #3c5860; }
+  .bar-row text.label{ fill: var(--text-dim); font-family: var(--mono); font-size: 11.5px; }
+  .bar-row text.value{ fill: var(--text); font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+  .bar-row.hl text.label{ fill: var(--accent); }
+  .bar-row.hl text.value{ fill: var(--accent); }
+  .bar-row rect{ transition: opacity .12s; }
+  .bar-row:hover rect.fill{ opacity: .82; }
+  .axis-line{ stroke: var(--line); stroke-width: 1; }
+
+  table.metrics{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 30px; }
+  table.metrics caption{ text-align: left; font-family: var(--mono); font-size: 12px; color: var(--text-faint); margin-bottom: 10px; }
+  table.metrics th, table.metrics td{
+    padding: 9px 12px; border-bottom: 1px solid var(--line-soft); text-align: right; font-family: var(--mono);
+  }
+  table.metrics th:first-child, table.metrics td:first-child{ text-align: left; font-family: var(--sans); }
+  table.metrics thead th{ color: var(--text-faint); font-weight: 500; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--line); }
+  table.metrics tbody tr:hover{ background: var(--bg-inset); }
+  table.metrics tr.hl td{ color: var(--accent); font-weight: 600; }
+  .table-wrap{ overflow-x: auto; }
+
+  .cost-note{
+    display: flex; gap: 14px; align-items: flex-start; margin-top: 24px;
+    border-left: 2px solid var(--accent-dim); padding: 4px 0 4px 16px; font-size: 14px; color: var(--text-dim);
+  }
+  .cost-note b{ color: var(--text); }
+
+  footer{ padding: 40px 0 60px; }
+  footer .wrap{ display: flex; flex-wrap: wrap; justify-content: space-between; gap: 20px; align-items: center; }
+  footer p{ margin: 0; font-size: 13px; color: var(--text-faint); }
+  footer .links{ display: flex; gap: 18px; font-family: var(--mono); font-size: 13px; }
+  .gpu-list{ font-family: var(--mono); }
+
+  code{ font-family: var(--mono); background: var(--bg-inset); border: 1px solid var(--line); padding: 1px 6px; border-radius: 4px; font-size: .9em; color: var(--text); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><span class="dot"></span> fsr3lite · demo</div>
+    <nav>
+      <a href="#usporedba">usporedba</a>
+      <a href="#detalj">detalj</a>
+      <a href="#metrike">metrike</a>
+      <a href="https://github.com/Antisa123/upscaling">repozitorij ↗</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <p class="eyebrow">FSR3-lite — završni rad</p>
+    <h1>Temporalni upscaler napisan od nule,<br><em>izmjeren</em>, ne samo pokazan.</h1>
+    <p class="lede">
+      Vlastiti renderer u C++20 i OpenGL 4.6 compute shaderima renderira scenu na
+      sniženoj rezoluciji, rekonstruira je do izlazne rezolucije (EASU/RCAS, TAAU,
+      dilatacija vektora, disokluzija, lockovi), i usporedno renderira <em>pravi</em>
+      native okvir kao referencu — pa je kvaliteta dolje brojka (PSNR/SSIM), a ne dojam.
+    </p>
+    <div class="stat-row">
+      <span class="stat-chip">Scena: <b>Sponza</b></span>
+      <span class="stat-chip">Način: <b>FSR + RCAS (M5)</b>, Quality 1.5×</span>
+      <span class="stat-chip">Render → izlaz: <b>1280×720 → 1920×1080</b></span>
+      <span class="stat-chip">PSNR vs. native: <b>35.02 dB</b></span>
+      <span class="stat-chip">SSIM vs. native: <b>0.9408</b></span>
+    </div>
+  </div>
+</section>
+
+<section id="usporedba">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">01</span><h2>Render rezolucija → upscale → native</h2></div>
+    <p class="section-sub">
+      Isti okvir, ista kamera. Prvi tab je stvarni frame buffer prije ikakve rekonstrukcije
+      — 1280×720, razvučen na ekran bez filtra (otud "blokovi"). Drugi je izlaz punog
+      upscalera (FSR + RCAS, M5) iz istog niskorezolucijskog renderiranja. Treći je native
+      1920×1080 render iste scene, iskorišten kao mjerna referenca.
+    </p>
+    <div class="viewer">
+      <div class="viewer-frame">
+        <img id="viewerImg" class="pixelated" src="assets/img/render_res.jpg" alt="Render rezolucija bez upscalinga, 1280x720">
+        <div class="viewer-badge">Rezolucija <span class="res" id="viewerRes">1280×720</span></div>
+        <div class="viewer-metrics" id="viewerMetrics">
+          GPU render only · <b>0.19 ms</b><br>~<b>5289</b> fps (samo render)
+        </div>
+      </div>
+      <div class="viewer-tabs">
+        <button class="tab-btn active" data-tab="render">Render rezolucija<small>1280×720, bez upscalera</small></button>
+        <button class="tab-btn" data-tab="upscaled">Upscaled — FSR+RCAS<small>1920×1080, iz 1280×720</small></button>
+        <button class="tab-btn" data-tab="native">Native referenca<small>1920×1080, puni render</small></button>
+      </div>
+    </div>
+    <p class="viewer-caption">Snimljeno binarnim izlazom projekta (<code>--shot</code>), skriptirana kamera, frame 80, Sponza glTF scena. Slika 1 blago je komprimirana za web; sirovi PNG snimci reproduciraju se lokalno preko <code>scripts/compare_upscalers.py</code>.</p>
+  </div>
+</section>
+
+<section id="detalj">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">02</span><h2>Detalj po pikselima</h2></div>
+    <p class="section-sub">
+      Brojka kaže koja je metoda bliža referenci; ne kaže <em>kako</em> griješi. Isti
+      izrezan detalj (lav na zidu), uvećan 5×, kroz svih šest upscalera plus sirovi render
+      i native referencu — nazupčanost kod nearest, mekoća kod bilinear/bicubic,
+      stabilizacija ruba kod FSR-a i TAAU-a.
+    </p>
+    <div class="mosaic">
+      <img src="assets/img/crop_grid.jpg" alt="Usporedba istog izreza kroz nearest, bilinear, bicubic, FSR1, TAAU, FSR, FSR+RCAS i native">
+    </div>
+    <p class="mosaic-caption">Generirano skriptom <code>scripts/compare_upscalers.py</code> — izrezuje isti okvir kroz sve upscalere i slaže mrežu za usporedbu.</p>
+  </div>
+</section>
+
+<section id="metrike">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">03</span><h2>Mjerene metrike</h2></div>
+    <p class="section-sub">
+      Sponza, Quality 1.5× (1280×720 → 1920×1080), 104 okvira, skriptirana kamera pri
+      60 fps orbiti. Pune tablice — uključujući Performance/Balanced/Ultra Performance,
+      ablacije i mjerenja na drugom GPU-u — u <code>captures/metrics/summary.md</code>.
+    </p>
+
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h3>PSNR naspram native reference</h3>
+        <p class="chart-unit">decibeli, više je bolje</p>
+        <svg id="chartPsnr" viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div class="chart-card">
+        <h3>Propusnost (GPU-bound)</h3>
+        <p class="chart-unit">okviri u sekundi, Sponza @ 1080p izlaz</p>
+        <svg id="chartFps" viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="metrics">
+        <caption>Sve metrike po upscaleru — Sponza, Quality 1.5×</caption>
+        <thead>
+          <tr><th>Upscaler</th><th>PSNR (dB)</th><th>SSIM</th><th>GPU (ms)</th><th>FPS (GPU)</th></tr>
+        </thead>
+        <tbody id="metricsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="chart-card" style="margin-top:28px;">
+      <h3>Cijena renderiranja bez upscalera, po rezoluciji</h3>
+      <p class="chart-unit">GPU ms po okviru — zašto se uopće isplati renderirati manje</p>
+      <svg id="chartCost" viewBox="0 0 460 220" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+    <div class="cost-note">
+      <p>Renderiranje na 720p umjesto na native 1080p smanji GPU trošak s <b>0.33 ms</b> na
+      <b>0.19 ms</b> po okviru na istoj sceni — upscaler zatim taj manji okvir rekonstruira
+      natrag na punu rezoluciju za dodatnih <b>~0.12–0.14 ms</b>, uz gubitak od par decibela
+      PSNR-a naspram punog native rendera. Otud isplativost upscalinga.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>FSR3-lite · vlastiti temporalni upscaler i procjena gibanja, C++20 / OpenGL 4.6 ·
+      testirano na <span class="gpu-list">NVIDIA RTX 5070</span> i <span class="gpu-list">AMD RX 7800 XT</span></p>
+    <div class="links">
+      <a href="https://github.com/Antisa123/upscaling">GitHub</a>
+      <a href="https://github.com/Antisa123/upscaling/blob/main/README.md">README</a>
+      <a href="https://github.com/Antisa123/upscaling/blob/main/docs/NASTAVAK.md">docs/NASTAVAK.md</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  // ---- 01: three-way viewer ----
+  var data = {
+    render: {
+      src: "assets/img/render_res.jpg", res: "1280×720", pixelated: true,
+      metrics: "GPU render only · <b>0.19 ms</b><br>~<b>5289</b> fps (samo render)"
+    },
+    upscaled: {
+      src: "assets/img/upscaled.jpg", res: "1920×1080", pixelated: false,
+      metrics: "PSNR <b>35.02 dB</b> · SSIM <b>0.9408</b><br>GPU <b>0.47 ms</b> · ~<b>2144</b> fps"
+    },
+    native: {
+      src: "assets/img/native.jpg", res: "1920×1080", pixelated: false,
+      metrics: "Referenca (nema odstupanja)<br>GPU <b>0.33 ms</b> · ~<b>3061</b> fps"
+    }
+  };
+  var img = document.getElementById("viewerImg");
+  var res = document.getElementById("viewerRes");
+  var met = document.getElementById("viewerMetrics");
+  var btns = document.querySelectorAll(".tab-btn");
+  btns.forEach(function(b){
+    b.addEventListener("click", function(){
+      btns.forEach(function(x){ x.classList.remove("active"); });
+      b.classList.add("active");
+      var d = data[b.getAttribute("data-tab")];
+      img.src = d.src;
+      img.classList.toggle("pixelated", d.pixelated);
+      res.textContent = d.res;
+      met.innerHTML = d.metrics;
+    });
+  });
+
+  // ---- metrics dataset (Sponza, Quality 1.5x) ----
+  var rows = [
+    { name: "Nearest",              psnr: 32.15, ssim: 0.8957, gpu: 0.24, fps: 4250, hl: false },
+    { name: "Bilinear",             psnr: 35.27, ssim: 0.9339, gpu: 0.23, fps: 4280, hl: false },
+    { name: "Bicubic",              psnr: 35.38, ssim: 0.9422, gpu: 0.24, fps: 4146, hl: false },
+    { name: "FSR1 EASU+RCAS",       psnr: 33.05, ssim: 0.9106, gpu: 0.30, fps: 3310, hl: false },
+    { name: "TAAU",                 psnr: 35.14, ssim: 0.9454, gpu: 0.33, fps: 2996, hl: false },
+    { name: "TAAU + RCAS",          psnr: 35.26, ssim: 0.9508, gpu: 0.36, fps: 2758, hl: false },
+    { name: "FSR (M5)",             psnr: 35.47, ssim: 0.9458, gpu: 0.45, fps: 2232, hl: false },
+    { name: "FSR + RCAS (M5)",      psnr: 35.02, ssim: 0.9408, gpu: 0.47, fps: 2144, hl: true  }
+  ];
+
+  var tbody = document.getElementById("metricsBody");
+  rows.forEach(function(r){
+    var tr = document.createElement("tr");
+    if (r.hl) tr.className = "hl";
+    tr.innerHTML = "<td>" + r.name + (r.hl ? " ★" : "") + "</td>" +
+      "<td>" + r.psnr.toFixed(2) + "</td>" +
+      "<td>" + r.ssim.toFixed(4) + "</td>" +
+      "<td>" + r.gpu.toFixed(2) + "</td>" +
+      "<td>" + r.fps.toLocaleString("hr-HR") + "</td>";
+    tbody.appendChild(tr);
+  });
+
+  // ---- SVG bar chart helper ----
+  function barChart(svgEl, items, opts){
+    opts = opts || {};
+    var W = 460, rowH = 30, top = 8, left = 8, right = 62, labelW = 170;
+    var H = top * 2 + items.length * rowH;
+    svgEl.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var trackX = left + labelW;
+    var trackW = W - trackX - right;
+    var max = opts.max || Math.max.apply(null, items.map(function(d){ return d.value; }));
+    var min = opts.min || 0;
+    var span = max - min;
+
+    var svgNS = "http://www.w3.org/2000/svg";
+    function el(tag, attrs){
+      var e = document.createElementNS(svgNS, tag);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+
+    items.forEach(function(d, i){
+      var y = top + i * rowH;
+      var barH = 14;
+      var barY = y + (rowH - barH) / 2;
+      var w = Math.max(2, (d.value - min) / span * trackW);
+
+      var g = el("g", { class: "bar-row" + (d.hl ? " hl" : "") });
+
+      var track = el("rect", { class: "track", x: trackX, y: barY, width: trackW, height: barH, rx: 3 });
+      var fill = el("rect", { class: "fill" + (d.hl ? "" : " dim"), x: trackX, y: barY, width: w, height: barH, rx: 3 });
+
+      var label = el("text", { class: "label", x: left, y: y + rowH / 2 + 4 });
+      label.textContent = d.name;
+
+      var value = el("text", { class: "value", x: trackX + trackW + 6, y: y + rowH / 2 + 4 });
+      value.textContent = opts.fmt ? opts.fmt(d.value) : d.value;
+
+      g.appendChild(track); g.appendChild(fill); g.appendChild(label); g.appendChild(value);
+      svgEl.appendChild(g);
+
+      var title = el("title", {});
+      title.textContent = d.name + ": " + (opts.fmt ? opts.fmt(d.value) : d.value);
+      g.appendChild(title);
+    });
+  }
+
+  var sorted = rows.slice().sort(function(a,b){ return b.psnr - a.psnr; });
+  barChart(document.getElementById("chartPsnr"),
+    sorted.map(function(r){ return { name: r.name, value: r.psnr, hl: r.hl }; }),
+    { min: 30, fmt: function(v){ return v.toFixed(1) + " dB"; } });
+
+  var sortedFps = rows.slice().sort(function(a,b){ return b.fps - a.fps; });
+  barChart(document.getElementById("chartFps"),
+    sortedFps.map(function(r){ return { name: r.name, value: r.fps, hl: r.hl }; }),
+    { fmt: function(v){ return v.toLocaleString("hr-HR"); } });
+
+  var cost = [
+    { name: "960×540 (samo render)",  value: 0.14 },
+    { name: "1280×720 (samo render)", value: 0.19 },
+    { name: "1920×1080 (native)",     value: 0.33 },
+    { name: "3840×2160 (native 4K)",  value: 1.31 }
+  ];
+  barChart(document.getElementById("chartCost"), cost, { fmt: function(v){ return v.toFixed(2) + " ms"; } });
+})();
+</script>
+
+</body>
+</html>

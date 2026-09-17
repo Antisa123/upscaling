@@ -60,6 +60,8 @@ def main():
 
     binary = REPO / args.build_dir / "fsr3lite"
     if not binary.exists():
+        binary = binary.with_suffix(".exe")
+    if not binary.exists():
         raise SystemExit(f"[shot] no binary at {binary}")
     out_dir = REPO / args.out
     out_dir.mkdir(parents=True, exist_ok=True)

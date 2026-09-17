@@ -12,18 +12,22 @@ reference), a ne dojam.
 ## Demo
 
 **[antisa123.github.io/upscaling/demo](https://antisa123.github.io/upscaling/demo/)**
-— render rezolucija naspram upscaled izlaza naspram native reference, na istom
-okviru (Sponza, FSR + RCAS, Quality 1.5×: 1280×720 → 1920×1080):
+— render rezolucija naspram upscaled izlaza naspram native reference, na istoj
+5-sekundnoj skriptiranoj putanji kamere (Sponza, FSR + RCAS, Quality 1.5×:
+1280×720 → 1920×1080):
 
-- tri-way pregled istog okvira (sirovi render / upscaled / native), s
-  metrikama uz svaku varijantu
+- tri-way video usporedba istog prolaza kamere (sirovi render / upscaled /
+  native), s metrikama uz svaku varijantu, plus sve tri odjednom jedna pored
+  druge u jednom videu
 - uvećan izrezak (5×) kroz svih šest upscalera jedan pored drugog, za razliku
   koju brojka ne pokaže
 - grafovi PSNR/SSIM/FPS po upscaleru i trošak renderiranja po rezoluciji, iz
   stvarnih mjerenja u `captures/metrics/summary.md`
 
-Stranica je statičan `demo/index.html`; slike su snimljene binarnim izlazom
-projekta preko `scripts/compare_upscalers.py` (vidi [Mjerenja](#mjerenja)).
+Stranica je statičan `demo/index.html`; videi su snimljeni binarnim izlazom
+projekta preko novog `--capture-seq <dir>` (dumpira svaki prikazan okvir kao
+PNG niz, isti mehanizam kao `--capture-gt`) i spojeni u H.264 preko `ffmpeg`;
+slike izrezaka preko `scripts/compare_upscalers.py` (vidi [Mjerenja](#mjerenja)).
 
 ## Stanje
 
@@ -94,7 +98,9 @@ Performance, `3.0` Ultra Performance. Izlaz je `--width`×`--height`, po default
 Režimi za `--upscaler`: `nearest`, `bilinear`, `bicubic`, `fsr1`, `taau`,
 `taau-rcas`, `fsr`, `fsr-rcas`. Bez zastavice se G-buffer prikazuje direktno.
 `--optical-flow` uključuje procjenu gibanja (po defaultu je isključena da ne
-ulazi u mjerenja upscalera).
+ulazi u mjerenja upscalera). `--capture-seq <dir>` dumpira svaki prikazan
+okvir kao numeriran PNG (`frame_00000.png`, ...) — za video, spoji ih naknadno
+s `ffmpeg -framerate 30 -i dir/frame_%05d.png ... out.mp4`.
 
 Tipke: `1`–`9` debug prikazi · `F1`–`F5` faktor skaliranja (NativeAA → Ultra
 Performance) · `J` jitter ·

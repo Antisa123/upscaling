@@ -95,7 +95,7 @@
     position: relative; aspect-ratio: 16/9; background: #000;
     display: flex; align-items: center; justify-content: center; overflow: hidden;
   }
-  .viewer-frame img{
+  .viewer-frame img, .viewer-frame video{
     width: 100%; height: 100%; object-fit: contain; object-position: center;
   }
   .viewer-frame img.pixelated{ image-rendering: pixelated; image-rendering: crisp-edges; }
@@ -128,6 +128,19 @@
   .viewer-tabs button.active small{ opacity: .75; }
 
   .viewer-caption{ font-size: 13px; color: var(--text-faint); margin-top: 12px; }
+
+  .trio{ margin-top: 30px; }
+  .trio-label{ font-size: 13px; color: var(--text-dim); margin: 0 0 10px; }
+  .trio-video{
+    width: 100%; aspect-ratio: 1920/360; display: block; border: 1px solid var(--line);
+    border-radius: 8px; background: #000; object-fit: contain;
+  }
+  .trio-captions{
+    display: flex; margin-top: 8px;
+  }
+  .trio-captions span{
+    flex: 1; text-align: center; font-family: var(--mono); font-size: 12px; color: var(--text-faint);
+  }
 
   /* ---- crop mosaic ---- */
   .mosaic{ border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg-inset); }
@@ -216,14 +229,18 @@
   <div class="wrap">
     <div class="section-head"><span class="idx">01</span><h2>Render rezolucija → upscale → native</h2></div>
     <p class="section-sub">
-      Isti okvir, ista kamera. Prvi tab je stvarni frame buffer prije ikakve rekonstrukcije
-      — 1280×720, razvučen na ekran bez filtra (otud "blokovi"). Drugi je izlaz punog
-      upscalera (FSR + RCAS, M5) iz istog niskorezolucijskog renderiranja. Treći je native
-      1920×1080 render iste scene, iskorišten kao mjerna referenca.
+      Ista kamera, ista skriptirana putanja (5 s orbite oko atrija), tri odvojena
+      prolaza kroz binarku. Prvi tab je stvarni frame buffer prije ikakve
+      rekonstrukcije — 1280×720, razvučen na ekran najbližim susjedom (otud
+      "blokovi", posebno u pokretu). Drugi je izlaz punog upscalera (FSR + RCAS,
+      M5) iz istog niskorezolucijskog renderiranja. Treći je native 1920×1080
+      render iste scene, iskorišten kao mjerna referenca.
     </p>
     <div class="viewer">
       <div class="viewer-frame">
-        <img id="viewerImg" class="pixelated" src="assets/img/render_res.jpg" alt="Render rezolucija bez upscalinga, 1280x720">
+        <video id="viewerVideo" autoplay muted loop playsinline
+               poster="assets/img/render_res_poster.jpg"
+               src="assets/video/render_res.mp4"></video>
         <div class="viewer-badge">Rezolucija <span class="res" id="viewerRes">1280×720</span></div>
         <div class="viewer-metrics" id="viewerMetrics">
           GPU render only · <b>0.19 ms</b><br>~<b>5289</b> fps (samo render)
@@ -235,7 +252,15 @@
         <button class="tab-btn" data-tab="native">Native referenca<small>1920×1080, puni render</small></button>
       </div>
     </div>
-    <p class="viewer-caption">Snimljeno binarnim izlazom projekta (<code>--shot</code>), skriptirana kamera, frame 80, Sponza glTF scena. Slika 1 blago je komprimirana za web; sirovi PNG snimci reproduciraju se lokalno preko <code>scripts/compare_upscalers.py</code>.</p>
+    <p class="viewer-caption">Snimljeno binarnim izlazom projekta (novi <code>--capture-seq &lt;dir&gt;</code>, dumpira svaki prikazan okvir kao PNG niz), skriptirana kamera, 150 okvira, Sponza glTF scena; spojeno u H.264 preko <code>ffmpeg</code>. Bez zvuka — namjerno.</p>
+
+    <div class="trio">
+      <p class="trio-label">Ili sve tri odjednom, jedan pored drugog:</p>
+      <video class="trio-video" autoplay muted loop playsinline
+             poster="assets/img/trio_poster.jpg"
+             src="assets/video/trio.mp4"></video>
+      <div class="trio-captions"><span>render (1280×720)</span><span>upscaled (FSR+RCAS)</span><span>native (1920×1080)</span></div>
+    </div>
   </div>
 </section>
 
@@ -318,19 +343,19 @@
   // ---- 01: three-way viewer ----
   var data = {
     render: {
-      src: "assets/img/render_res.jpg", res: "1280×720", pixelated: true,
+      src: "assets/video/render_res.mp4", poster: "assets/img/render_res_poster.jpg", res: "1280×720",
       metrics: "GPU render only · <b>0.19 ms</b><br>~<b>5289</b> fps (samo render)"
     },
     upscaled: {
-      src: "assets/img/upscaled.jpg", res: "1920×1080", pixelated: false,
+      src: "assets/video/upscaled.mp4", poster: "assets/img/upscaled_poster.jpg", res: "1920×1080",
       metrics: "PSNR <b>35.02 dB</b> · SSIM <b>0.9408</b><br>GPU <b>0.47 ms</b> · ~<b>2144</b> fps"
     },
     native: {
-      src: "assets/img/native.jpg", res: "1920×1080", pixelated: false,
+      src: "assets/video/native.mp4", poster: "assets/img/native_poster.jpg", res: "1920×1080",
       metrics: "Referenca (nema odstupanja)<br>GPU <b>0.33 ms</b> · ~<b>3061</b> fps"
     }
   };
-  var img = document.getElementById("viewerImg");
+  var video = document.getElementById("viewerVideo");
   var res = document.getElementById("viewerRes");
   var met = document.getElementById("viewerMetrics");
   var btns = document.querySelectorAll(".tab-btn");
@@ -339,8 +364,10 @@
       btns.forEach(function(x){ x.classList.remove("active"); });
       b.classList.add("active");
       var d = data[b.getAttribute("data-tab")];
-      img.src = d.src;
-      img.classList.toggle("pixelated", d.pixelated);
+      video.poster = d.poster;
+      video.src = d.src;
+      video.load();
+      video.play().catch(function(){});
       res.textContent = d.res;
       met.innerHTML = d.metrics;
     });

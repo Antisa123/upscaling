@@ -65,6 +65,12 @@ struct Options {
     float flowScale = 24.f;
     // Ground-truth capture: directory to dump reference frames into.
     std::string captureGtDir;
+    // Directory to dump every presented frame into as a numbered PNG
+    // sequence (whatever is actually on screen: raw render, upscaled output,
+    // native -- depends on the other flags), for stitching into a video with
+    // an external tool. Off by default; unlike --capture-gt this does not
+    // render anything extra, it just also writes what --shot would.
+    std::string captureSeqDir;
     // Which spatial baseline runs between the G-buffer and the screen.
     // Empty = present the G-buffer directly (the pre-M3 path).
     std::string upscaler;
@@ -270,6 +276,7 @@ int main(int argc, char** argv) {
         else if (arg == "--cut-every" && i + 1 < argc) options.cutEvery = std::atoi(argv[++i]);
         else if (arg == "--flow-scale" && i + 1 < argc) options.flowScale = std::atof(argv[++i]);
         else if (arg == "--capture-gt" && i + 1 < argc) options.captureGtDir = argv[++i];
+        else if (arg == "--capture-seq" && i + 1 < argc) options.captureSeqDir = argv[++i];
         else if (arg == "--upscaler" && i + 1 < argc) options.upscaler = argv[++i];
         else if (arg == "--validate-upscale") options.validateUpscale = true;
         else if (arg == "--sharpness" && i + 1 < argc) options.sharpness = std::atof(argv[++i]);
@@ -605,6 +612,8 @@ int main(int argc, char** argv) {
         gtManifest << "index,time_s,mid_time_s,render_res,display_res\n";
         gtManifest << std::fixed << std::setprecision(6);
     }
+    const bool captureSeq = !options.captureSeqDir.empty();
+    if (captureSeq) std::filesystem::create_directories(options.captureSeqDir);
 
     int debugMode = options.debugView;
 
@@ -1522,6 +1531,12 @@ int main(int argc, char** argv) {
             ++presentedCounter;
         }
         timer.endFrame();
+
+        if (captureSeq) {
+            char name[32];
+            std::snprintf(name, sizeof(name), "frame_%05lld.png", frameCounter);
+            writeTexture(slot.real, (std::filesystem::path(options.captureSeqDir) / name).string());
+        }
 
         if (shotRequested || (lastFrame && options.autoShot)) {
             const std::string path = shotRequested

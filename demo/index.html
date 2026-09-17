@@ -193,11 +193,29 @@
   .scatter-grid{ stroke: var(--line-soft); stroke-width: 1; }
   .scatter-axis text{ fill: var(--text-faint); font-family: var(--mono); font-size: 11px; }
   .scatter-axis-title{ fill: var(--text-faint); font-family: var(--mono); font-size: 11px; }
-  .scatter-point circle{ fill: #3c5860; stroke: var(--bg-raised); stroke-width: 2; transition: r .12s; }
-  .scatter-point text{ fill: var(--text-dim); font-family: var(--mono); font-size: 12px; }
-  .scatter-point:hover circle{ r: 9; }
-  .scatter-point.hl circle{ fill: var(--accent); }
-  .scatter-point.hl text{ fill: var(--accent); font-weight: 600; }
+  .scatter-point circle.dot{ fill: #3c5860; stroke: var(--bg-raised); stroke-width: 2; transition: r .12s; }
+  .scatter-point text.num{
+    fill: var(--text); font-family: var(--mono); font-size: 11px; font-weight: 600;
+    text-anchor: middle; dominant-baseline: central; pointer-events: none;
+  }
+  .scatter-point:hover circle.dot{ r: 13; }
+  .scatter-point.hl circle.dot{ fill: var(--accent); }
+  .scatter-point.hl text.num{ fill: var(--accent-ink); }
+
+  .scatter-legend{
+    display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 16px;
+    padding-top: 14px; border-top: 1px solid var(--line-soft);
+  }
+  .scatter-legend .item{
+    display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 12.5px; color: var(--text-dim);
+  }
+  .scatter-legend .item.hl{ color: var(--accent); font-weight: 600; }
+  .scatter-legend .badge{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%; background: #3c5860; color: var(--text);
+    font-size: 10.5px; font-weight: 600; flex: none;
+  }
+  .scatter-legend .item.hl .badge{ background: var(--accent); color: var(--accent-ink); }
 
   table.metrics{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 30px; }
   table.metrics caption{ text-align: left; font-family: var(--mono); font-size: 12px; color: var(--text-faint); margin-bottom: 10px; }
@@ -335,7 +353,8 @@
     <div class="chart-card">
       <h3>Kvaliteta naspram brzine</h3>
       <p class="chart-unit">PSNR (dB, više = bliže native) naspram FPS (GPU-bound) — gore-desno je bolje na oba mjerila</p>
-      <svg id="chartScatter" viewBox="0 0 900 420" preserveAspectRatio="xMidYMid meet"></svg>
+      <svg id="chartScatter" viewBox="0 0 900 340" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="scatter-legend" id="scatterLegend"></div>
     </div>
 
     <div class="table-wrap">
@@ -537,8 +556,13 @@
   }
 
   // ---- quality-vs-speed scatter ----
+  // Numbered points instead of floating text labels: with 8 points and
+  // several clustered close together (bilinear/bicubic, TAAU/TAAU+RCAS),
+  // no fixed label offset survives every viewport width without collisions.
+  // A small numbered badge plus a legend below sidesteps that entirely.
   function scatterChart(svgEl, points){
-    var W = 900, H = 420, ml = 58, mr = 24, mt = 20, mb = 44;
+    var W = 900, H = 340, ml = 46, mr = 26, mt = 20, mb = 40;
+    svgEl.setAttribute("viewBox", "0 0 " + W + " " + H);
     var plotW = W - ml - mr, plotH = H - mt - mb;
     var xMin = 2000, xMax = 4400, yMin = 31, yMax = 36;
 
@@ -555,53 +579,52 @@
     for (var yv = yMin; yv <= yMax; yv++) {
       var gy = py(yv);
       svgEl.appendChild(el("line", { class: "scatter-grid", x1: ml, y1: gy, x2: ml + plotW, y2: gy }));
-      var yl = el("text", { class: "scatter-axis", x: ml - 10, y: gy + 4, "text-anchor": "end" });
-      yl.textContent = yv + " dB";
+      var yl = el("text", { class: "scatter-axis", x: ml - 8, y: gy + 4, "text-anchor": "end" });
+      yl.textContent = yv;
       svgEl.appendChild(yl);
     }
     for (var xv = xMin; xv <= xMax; xv += 500) {
       var gx = px(xv);
       svgEl.appendChild(el("line", { class: "scatter-grid", x1: gx, y1: mt, x2: gx, y2: mt + plotH }));
-      var xl = el("text", { class: "scatter-axis", x: gx, y: mt + plotH + 20, "text-anchor": "middle" });
-      xl.textContent = xv.toLocaleString("hr-HR");
+      var xl = el("text", { class: "scatter-axis", x: gx, y: mt + plotH + 18, "text-anchor": "middle" });
+      xl.textContent = (xv / 1000) + "k";
       svgEl.appendChild(xl);
     }
-    var xTitle = el("text", { class: "scatter-axis-title", x: ml + plotW / 2, y: H - 4, "text-anchor": "middle" });
-    xTitle.textContent = "FPS (GPU-bound, veće = brže) →";
+    var xTitle = el("text", { class: "scatter-axis-title", x: ml + plotW / 2, y: H - 2, "text-anchor": "middle" });
+    xTitle.textContent = "FPS (GPU-bound) →";
     svgEl.appendChild(xTitle);
-    var yTitle = el("text", { class: "scatter-axis-title", x: -(mt + plotH / 2), y: 16, "text-anchor": "middle",
+    var yTitle = el("text", { class: "scatter-axis-title", x: -(mt + plotH / 2), y: 14, "text-anchor": "middle",
                                transform: "rotate(-90)" });
-    yTitle.textContent = "PSNR vs. native (dB, veće = bliže) →";
+    yTitle.textContent = "PSNR (dB) →";
     svgEl.appendChild(yTitle);
 
     points.forEach(function(p){
       var cx = px(p.fps), cy = py(p.psnr);
       var g = el("g", { class: "scatter-point" + (p.hl ? " hl" : "") });
-      g.appendChild(el("circle", { cx: cx, cy: cy, r: 6 }));
-      var label = el("text", { x: cx, y: cy + p.dy, "text-anchor": p.anchor });
-      label.textContent = p.label;
-      g.appendChild(label);
+      g.appendChild(el("circle", { class: "dot", cx: cx, cy: cy, r: 10 }));
+      var num = el("text", { class: "num", x: cx, y: cy });
+      num.textContent = p.n;
+      g.appendChild(num);
       var title = el("title", {});
-      title.textContent = p.name + ": " + p.psnr.toFixed(2) + " dB, " + p.fps.toLocaleString("hr-HR") + " fps";
+      title.textContent = p.n + ". " + p.name + " — " + p.psnr.toFixed(2) + " dB, " +
+                           p.fps.toLocaleString("hr-HR") + " fps";
       g.appendChild(title);
       svgEl.appendChild(g);
     });
   }
 
-  var labelMeta = {
-    "Nearest":              { label: "Nearest",    dy: -14, anchor: "end" },
-    "Bilinear":             { label: "Bilinear",   dy: -14, anchor: "end" },
-    "Bicubic":              { label: "Bicubic",    dy: 20,  anchor: "end" },
-    "FSR1 EASU+RCAS":       { label: "FSR1",       dy: -14, anchor: "middle" },
-    "TAAU":                 { label: "TAAU",       dy: 20,  anchor: "middle" },
-    "TAAU + RCAS":          { label: "TAAU+RCAS",  dy: -14, anchor: "middle" },
-    "FSR (M5)":             { label: "FSR",        dy: -14, anchor: "start" },
-    "FSR + RCAS (M5)":      { label: "FSR+RCAS ★", dy: 20,  anchor: "start" }
-  };
-  scatterChart(document.getElementById("chartScatter"), rows.map(function(r){
-    var m = labelMeta[r.name];
-    return { name: r.name, psnr: r.psnr, fps: r.fps, hl: r.hl, label: m.label, dy: m.dy, anchor: m.anchor };
-  }));
+  var scatterPoints = rows.map(function(r, i){
+    return { n: i + 1, name: r.name, psnr: r.psnr, fps: r.fps, hl: r.hl };
+  });
+  scatterChart(document.getElementById("chartScatter"), scatterPoints);
+
+  var legend = document.getElementById("scatterLegend");
+  scatterPoints.forEach(function(p){
+    var item = document.createElement("span");
+    item.className = "item" + (p.hl ? " hl" : "");
+    item.innerHTML = "<span class=\"badge\">" + p.n + "</span>" + p.name + (p.hl ? " ★" : "");
+    legend.appendChild(item);
+  });
 
   var cost = [
     { name: "960×540 (samo render)",  value: 0.14 },

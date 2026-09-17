@@ -9,6 +9,22 @@ puni native okvir kao referencu za upscaler i pravi među-okvir na t−0.5·dt k
 referencu za interpolaciju. Zato je kvaliteta ovdje brojka (PSNR/SSIM naspram
 reference), a ne dojam.
 
+## Demo
+
+**[antisa123.github.io/upscaling/demo](https://antisa123.github.io/upscaling/demo/)**
+— render rezolucija naspram upscaled izlaza naspram native reference, na istom
+okviru (Sponza, FSR + RCAS, Quality 1.5×: 1280×720 → 1920×1080):
+
+- tri-way pregled istog okvira (sirovi render / upscaled / native), s
+  metrikama uz svaku varijantu
+- uvećan izrezak (5×) kroz svih šest upscalera jedan pored drugog, za razliku
+  koju brojka ne pokaže
+- grafovi PSNR/SSIM/FPS po upscaleru i trošak renderiranja po rezoluciji, iz
+  stvarnih mjerenja u `captures/metrics/summary.md`
+
+Stranica je statičan `demo/index.html`; slike su snimljene binarnim izlazom
+projekta preko `scripts/compare_upscalers.py` (vidi [Mjerenja](#mjerenja)).
+
 ## Stanje
 
 | | Modul | Status |

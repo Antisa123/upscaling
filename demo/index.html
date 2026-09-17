@@ -234,6 +234,17 @@
   }
   .cost-note b{ color: var(--text); }
 
+  /* ---- ML prototype figure ---- */
+  .ml-figure{
+    margin: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg-inset);
+  }
+  .ml-figure img{ width: 100%; display: block; }
+  .ml-legend{ margin-top: 16px; display: flex; }
+  .ml-legend img{
+    max-width: 220px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg-raised); padding: 10px;
+  }
+
   footer{ padding: 40px 0 60px; }
   footer .wrap{ display: flex; flex-wrap: wrap; justify-content: space-between; gap: 20px; align-items: center; }
   footer p{ margin: 0; font-size: 13px; color: var(--text-faint); }
@@ -249,6 +260,7 @@
   <div class="wrap">
     <div class="brand"><span class="dot"></span> fsr3lite · demo</div>
     <nav>
+      <a href="#ml">ml prototip</a>
       <a href="#usporedba">usporedba</a>
       <a href="#detalj">detalj</a>
       <a href="#metrike">metrike</a>
@@ -273,6 +285,48 @@
       <span class="stat-chip">Render → izlaz: <b>1280×720 → 1920×1080</b></span>
       <span class="stat-chip">PSNR vs. native: <b>35.02 dB</b></span>
       <span class="stat-chip">SSIM vs. native: <b>0.9408</b></span>
+    </div>
+  </div>
+</section>
+
+<section id="ml">
+  <div class="wrap">
+    <div class="section-head"><span class="idx">00</span><h2>Naučena mješavina — naš ML prototip</h2></div>
+    <p class="section-sub">
+      Srž rada nije samo klasični FSR3 upscaling nego i naučena komponenta: mala
+      mreža (7&nbsp;199 parametara) uči <em>softmax</em> težine spajanja sedam
+      kandidata za generirani među-okvir — četiri warpa (game vektori i optical
+      flow, t−1 i t), dva nepomaknuta okvira i ručna heuristika — umjesto fiksnih
+      pravila. Trenirana vlastitim CPU trenerom (C++20 + OpenMP, ~8 min na
+      nekoliko tisuća okvira), inferencija u GLSL-u na punoj rezoluciji.
+    </p>
+
+    <div class="stat-row" style="margin-bottom:26px;">
+      <span class="stat-chip">Parametri: <b>7 199</b></span>
+      <span class="stat-chip">SSIM viši: <b>8 / 8</b> mjernih pogleda</span>
+      <span class="stat-chip">PSNR: <b>+0.03 do +0.20 dB</b> (7/8 pogleda)</span>
+      <span class="stat-chip">Cijena: <b>+1.1 ms</b> (RTX 5070) · <b>+2.7 ms</b> (RX 580)</span>
+    </div>
+
+    <figure class="ml-figure">
+      <img src="assets/img/ml/sponza-frame57.png" loading="lazy"
+           alt="Usporedba heuristike i naučene mješavine, Sponza 1080p Quality, okvir 57: referenca, heuristika, naučena mješavina, težine i pogreške ×6, s izrescima gdje mreža najviše pomaže (+1.59 dB) i gdje najviše šteti">
+    </figure>
+    <p class="mosaic-caption">
+      Gore: izrezak gdje mreža najviše <b>pomaže</b> (+1.59 dB na cijelom okviru).
+      Dolje: izrezak gdje mreža najviše <b>šteti</b> — pošteno prikazan, ne skriven.
+      Stupac "težine" boja svaki piksel po pobjedničkom kandidatu iz mješavine:
+    </p>
+    <div class="ml-legend">
+      <img src="assets/img/ml/legend.png" loading="lazy"
+           alt="Legenda boja u stupcu težina: heuristika (sivo), game warp t-1/t (zeleno), flow warp t-1/t (plavo), trenutni okvir (crveno), prethodni okvir (narančasto)">
+    </div>
+
+    <div class="cost-note">
+      <p><b>Pošteno ograničenje:</b> dobitak nestaje na najgorem okviru i na
+      neviđenoj sceni izvan skupa za učenje; ni na GPU-u s Tensor Core jedinicama
+      se ne isplati, jer implementacija namjerno ne koristi tenzorske instrukcije.
+      Puna analiza u <code>docs/ML.md</code> i <code>docs/ML_KOMERCIJALNO.md</code>.</p>
     </div>
   </div>
 </section>
@@ -388,6 +442,7 @@
     <div class="links">
       <a href="https://github.com/Antisa123/upscaling">GitHub</a>
       <a href="https://github.com/Antisa123/upscaling/blob/main/README.md">README</a>
+      <a href="https://github.com/Antisa123/upscaling/blob/main/docs/ML.md">docs/ML.md</a>
       <a href="https://github.com/Antisa123/upscaling/blob/main/docs/NASTAVAK.md">docs/NASTAVAK.md</a>
     </div>
   </div>

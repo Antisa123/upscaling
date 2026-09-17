@@ -17,8 +17,6 @@ Status: prijedlog plana, v1 (2026-09-11)
 | "poboljšati percepcijsku kvalitetu" | Modul F: PSNR/SSIM/FLIP/LPIPS naspram ground-truth rendera |
 | "optimizirati performanse u aplikacijama u stvarnom vremenu" | Modul F: profiliranje po passu (GPU timestamp queries), analiza latencije |
 
-**Otvoreno prema mentoru:** Excel na SharePointu je zaključan (HTTP 403) — treba nam njegov sadržaj da provjerimo formalne zahtjeve (opseg, rok, forma predaje, je li rad individualan).
-
 ---
 
 ## 1. Odluke
@@ -298,11 +296,3 @@ ante-galic/
 12. Zaključak i mogući nastavak
 
 **Literatura (jezgra):** FSR3 dokumentacija (interpolation, optical flow, super-resolution), GPUOpen FSR članci, Fleet & Weiss *Optical Flow Estimation*, Karis *High Quality Temporal Supersampling* (TAA), Yang et al. *A Survey of Temporal Antialiasing Techniques*, RIFE/FILM radovi, radovi o metrikama za interpolaciju okvira.
-
----
-
-## 13. Što trebamo prije početka
-
-1. Sadržaj zaključanog Excela (formalni zahtjevi, rok, je li rad timski).
-2. Potvrda mentora traži li stvarnu ML implementaciju ili je dovoljna analiza — plan je napisan tako da se ML modul može dodati bez dirati jezgru.
-3. Odabir scene (Sponza je dovoljna; Bistro je zahtjevniji, ali ima bolji materijal za artefakte).

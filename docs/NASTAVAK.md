@@ -1,6 +1,7 @@
 # Povijest rada i odluka
 
-Stanje na dan 16. 9. 2026.: **svi moduli (M0–M10) su gotovi.** Dokument
+Stanje na dan 16. 9. 2026.: **svi moduli (M0–M9) su gotovi; M10 (pisani rad)
+nije potreban za ovu predaju.** Dokument
 bilježi odluke, brojke i probleme na koje se naišlo, za slučaj da se rad
 nastavlja ili provjerava kasnije. Za opseg rada vidi [`PLAN.md`](../PLAN.md),
 za build i pokretanje [`README.md`](../README.md).
@@ -16,10 +17,9 @@ za build i pokretanje [`README.md`](../README.md).
   - Vlastita varijanta i alati za demonstraciju su gotovi.
   - Tekst o komercijalnim rješenjima (`docs/ML_KOMERCIJALNO.md`) i odjeljak
     „Demonstracija“ u `docs/ML.md` su napisani.
-- **M10 (tekst rada) je napisan:** `docs/thesis/zavrsni-rad.tex` /
-  `.pdf`, svih 12 poglavlja po strukturi iz `PLAN.md` (poglavlje 12).
-  Preostaju samo životopisi kandidata (trenutno placeholderi) i provjera
-  mentorove titule na naslovnici.
+- **M10 (tekst rada) se ne piše.** Skica je postojala kratko
+  (`docs/thesis/`), ali se pokazalo da formalni pisani rad nije potreban za
+  ovu predaju, pa je uklonjena. Predaje se repozitorij.
 
 ## Što je gotovo u M9 (naučena mješavina)
 
@@ -80,9 +80,8 @@ Detalji i sve brojke su u [`docs/ML.md`](ML.md).
    `README.md`.
 5. **Ponovno izmjeriti trajanje passa 12** nakon popravka iz točke 3. ✅
    Dovršeno: ista cijena (grananje po uniformu ne mijenja trajanje).
-6. **M10: rad.** ✅ Tekst napisan: [`docs/thesis/zavrsni-rad.tex`](thesis/zavrsni-rad.tex)
-   / `.pdf`. Preostaju samo životopisi kandidata (placeholderi) i provjera
-   mentorove titule na naslovnici — vidi izvor za oznake.
+6. **M10: rad.** Nije potreban za ovu predaju — predaje se repozitorij.
+   Kratkotrajna skica teksta rada je uklonjena iz `docs/thesis/`.
 
 ## Na što paziti
 

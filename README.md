@@ -32,7 +32,7 @@ Brojke i ablacije po modulu su u `docs/` (vidi niže); agregirane tablice u
 ## Ovisnosti
 
 - CMake ≥ 3.20, prevoditelj s C++20
-- GPU i driver s OpenGL 4.6 core (testirano na AMD RX 580/590, NVIDIA RTX 5070
+- GPU i driver s OpenGL 4.6 core (testirano na NVIDIA RTX 5070
   i AMD RX 7800 XT)
 - SDL2 i libepoxy (traže se preko `pkg-config`)
 - Python 3 + Pillow, samo za skripte u `scripts/`

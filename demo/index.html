@@ -106,6 +106,16 @@
     padding: 6px 10px; border-radius: 6px; display: flex; gap: 10px;
   }
   .viewer-badge span.res{ color: var(--accent); }
+  .viewer-mode{
+    position: absolute; top: 12px; right: 12px; display: flex;
+    background: rgba(6,9,9,.78); border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+  }
+  .viewer-mode .mode-btn{
+    appearance: none; border: none; background: transparent; color: var(--text-dim);
+    font-family: var(--mono); font-size: 12px; padding: 6px 12px; cursor: pointer;
+  }
+  .viewer-mode .mode-btn.active{ background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .viewer-mode .mode-btn:not(.active):hover{ color: var(--text); }
   .viewer-metrics{
     position: absolute; bottom: 12px; right: 12px;
     font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
@@ -241,7 +251,12 @@
         <video id="viewerVideo" autoplay muted loop playsinline
                poster="assets/img/render_res_poster.jpg"
                src="assets/video/render_res.mp4"></video>
+        <img id="viewerImg" hidden src="assets/img/render_res_poster.jpg" alt="Render rezolucija bez upscalinga, 1280×720 razvučeno na 1920×1080">
         <div class="viewer-badge">Rezolucija <span class="res" id="viewerRes">1280×720</span></div>
+        <div class="viewer-mode" role="group" aria-label="Video ili statična slika">
+          <button type="button" class="mode-btn active" data-mode="video">Video</button>
+          <button type="button" class="mode-btn" data-mode="image">Slika</button>
+        </div>
         <div class="viewer-metrics" id="viewerMetrics">
           GPU render only · <b>0.19 ms</b><br>~<b>5289</b> fps (samo render)
         </div>
@@ -252,7 +267,13 @@
         <button class="tab-btn" data-tab="native">Native referenca<small>1920×1080, puni render</small></button>
       </div>
     </div>
-    <p class="viewer-caption">Snimljeno binarnim izlazom projekta (novi <code>--capture-seq &lt;dir&gt;</code>, dumpira svaki prikazan okvir kao PNG niz), skriptirana kamera, 150 okvira, Sponza glTF scena; spojeno u H.264 preko <code>ffmpeg</code>. Bez zvuka — namjerno.</p>
+    <p class="viewer-caption">
+      <b>Video</b>: binarni izlaz snimljen novim <code>--capture-seq &lt;dir&gt;</code>
+      (dumpira svaki prikazan okvir kao PNG niz), skriptirana kamera, 150 okvira,
+      spojeno u H.264 preko <code>ffmpeg</code>, bez zvuka. <b>Slika</b>: jedan
+      okvir iz istog videa, za mirnu usporedbu bez kompresijskih artefakata pokreta —
+      isti izvor kao mreža izrezaka ispod.
+    </p>
 
     <div class="trio">
       <p class="trio-label">Ili sve tri odjednom, jedan pored drugog:</p>
@@ -356,20 +377,51 @@
     }
   };
   var video = document.getElementById("viewerVideo");
+  var img = document.getElementById("viewerImg");
   var res = document.getElementById("viewerRes");
   var met = document.getElementById("viewerMetrics");
   var btns = document.querySelectorAll(".tab-btn");
-  btns.forEach(function(b){
-    b.addEventListener("click", function(){
-      btns.forEach(function(x){ x.classList.remove("active"); });
-      b.classList.add("active");
-      var d = data[b.getAttribute("data-tab")];
+  var modeBtns = document.querySelectorAll(".mode-btn");
+  var mode = "video";
+  var activeTab = "render";
+
+  function applyTab(tab){
+    activeTab = tab;
+    var d = data[tab];
+    res.textContent = d.res;
+    met.innerHTML = d.metrics;
+    img.src = d.poster;
+    img.alt = d.res + " — " + tab;
+    if (mode === "video") {
       video.poster = d.poster;
       video.src = d.src;
       video.load();
       video.play().catch(function(){});
-      res.textContent = d.res;
-      met.innerHTML = d.metrics;
+    }
+  }
+
+  btns.forEach(function(b){
+    b.addEventListener("click", function(){
+      btns.forEach(function(x){ x.classList.remove("active"); });
+      b.classList.add("active");
+      applyTab(b.getAttribute("data-tab"));
+    });
+  });
+
+  modeBtns.forEach(function(b){
+    b.addEventListener("click", function(){
+      modeBtns.forEach(function(x){ x.classList.remove("active"); });
+      b.classList.add("active");
+      mode = b.getAttribute("data-mode");
+      if (mode === "image") {
+        video.pause();
+        video.hidden = true;
+        img.hidden = false;
+      } else {
+        img.hidden = true;
+        video.hidden = false;
+        applyTab(activeTab);
+      }
     });
   });
 

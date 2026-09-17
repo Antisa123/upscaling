@@ -99,6 +99,11 @@
     width: 100%; height: 100%; object-fit: contain; object-position: center;
   }
   .viewer-frame img.pixelated{ image-rendering: pixelated; image-rendering: crisp-edges; }
+  /* The global `img{ display:block }` reset is author CSS, so it beats the
+     browser's own `[hidden]{ display:none }` UA rule regardless of
+     specificity -- without this, a "hidden" viewer image still lays out in
+     the flex row next to the video, splitting the box in half. */
+  [hidden]{ display: none !important; }
   .viewer-badge{
     position: absolute; top: 12px; left: 12px;
     font-family: var(--mono); font-size: 12px; color: var(--text);
@@ -153,8 +158,20 @@
   }
 
   /* ---- crop mosaic ---- */
-  .mosaic{ border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg-inset); }
-  .mosaic img{ width: 100%; }
+  .mosaic{
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--line);
+  }
+  @media (max-width: 640px){ .mosaic{ grid-template-columns: repeat(2, 1fr); } }
+  .mosaic figure{ margin: 0; background: var(--bg-inset); position: relative; }
+  .mosaic figure.hl{ box-shadow: inset 0 0 0 2px var(--accent); }
+  .mosaic img{ width: 100%; display: block; }
+  .mosaic figcaption{
+    padding: 8px 10px; font-family: var(--mono); font-size: 12px; color: var(--text-dim);
+    display: flex; justify-content: space-between; gap: 8px;
+  }
+  .mosaic figcaption b{ color: var(--text); font-weight: 600; }
+  .mosaic figcaption span{ color: var(--text-faint); }
   .mosaic-caption{ font-size: 13px; color: var(--text-faint); margin-top: 12px; }
 
   /* ---- charts ---- */
@@ -271,8 +288,7 @@
       <b>Video</b>: binarni izlaz snimljen novim <code>--capture-seq &lt;dir&gt;</code>
       (dumpira svaki prikazan okvir kao PNG niz), skriptirana kamera, 150 okvira,
       spojeno u H.264 preko <code>ffmpeg</code>, bez zvuka. <b>Slika</b>: jedan
-      okvir iz istog videa, za mirnu usporedbu bez kompresijskih artefakata pokreta —
-      isti izvor kao mreža izrezaka ispod.
+      okvir iz istog videa, za mirnu usporedbu bez kompresijskih artefakata pokreta.
     </p>
 
     <div class="trio">
@@ -290,14 +306,13 @@
     <div class="section-head"><span class="idx">02</span><h2>Detalj po pikselima</h2></div>
     <p class="section-sub">
       Brojka kaže koja je metoda bliža referenci; ne kaže <em>kako</em> griješi. Isti
-      izrezan detalj (lav na zidu), uvećan 5×, kroz svih šest upscalera plus sirovi render
+      izrezan detalj (lav na zidu), uvećan 3×, kroz svih šest upscalera plus sirovi render
       i native referencu — nazupčanost kod nearest, mekoća kod bilinear/bicubic,
-      stabilizacija ruba kod FSR-a i TAAU-a.
+      stabilizacija ruba kod FSR-a i TAAU-a. PSNR uz svaku sličicu je Sponza,
+      Quality 1.5× iz tablice ispod.
     </p>
-    <div class="mosaic">
-      <img src="assets/img/crop_grid.jpg" alt="Usporedba istog izreza kroz nearest, bilinear, bicubic, FSR1, TAAU, FSR, FSR+RCAS i native">
-    </div>
-    <p class="mosaic-caption">Generirano skriptom <code>scripts/compare_upscalers.py</code> — izrezuje isti okvir kroz sve upscalere i slaže mrežu za usporedbu.</p>
+    <div class="mosaic" id="mosaicGrid"></div>
+    <p class="mosaic-caption">Isti izrezan pravokutnik (lav na zidu, desno), izrezan iz svakog punog okvira i uvećan 3× najbližim susjedom — bez dodatnog zamućenja iz samog uvećanja, ono što se vidi je stvarni piksel svake metode. Generirano skriptom <code>scripts/compare_upscalers.py</code>.</p>
   </div>
 </section>
 
@@ -423,6 +438,33 @@
         applyTab(activeTab);
       }
     });
+  });
+
+  // ---- 02: pixel-detail mosaic ----
+  var mosaicTiles = [
+    { key: "render",   label: "Render rezolucija", res: "1280×720",  note: "bez upscalera", hl: false },
+    { key: "nearest",  label: "Nearest",            res: "1920×1080", note: "32.15 dB",       hl: false },
+    { key: "bilinear", label: "Bilinear",            res: "1920×1080", note: "35.27 dB",       hl: false },
+    { key: "bicubic",  label: "Bicubic",             res: "1920×1080", note: "35.38 dB",       hl: false },
+    { key: "fsr1",     label: "FSR1 EASU+RCAS",      res: "1920×1080", note: "33.05 dB",       hl: false },
+    { key: "taau",     label: "TAAU",                res: "1920×1080", note: "35.14 dB",       hl: false },
+    { key: "fsr",      label: "FSR (M5)",            res: "1920×1080", note: "35.47 dB",       hl: false },
+    { key: "fsr-rcas", label: "FSR + RCAS (M5)",     res: "1920×1080", note: "35.02 dB",       hl: true  },
+    { key: "native",   label: "Native",              res: "1920×1080", note: "referenca",      hl: false }
+  ];
+  var mosaicGrid = document.getElementById("mosaicGrid");
+  mosaicTiles.forEach(function(t){
+    var fig = document.createElement("figure");
+    if (t.hl) fig.className = "hl";
+    var img = document.createElement("img");
+    img.src = "assets/img/crop/" + t.key + ".jpg";
+    img.loading = "lazy";
+    img.alt = t.label + " (" + t.res + "), uvećan izrezak";
+    var cap = document.createElement("figcaption");
+    cap.innerHTML = "<b>" + t.label + (t.hl ? " ★" : "") + "</b><span>" + t.note + "</span>";
+    fig.appendChild(img);
+    fig.appendChild(cap);
+    mosaicGrid.appendChild(fig);
   });
 
   // ---- metrics dataset (Sponza, Quality 1.5x) ----

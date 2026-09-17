@@ -175,8 +175,6 @@
   .mosaic-caption{ font-size: 13px; color: var(--text-faint); margin-top: 12px; }
 
   /* ---- charts ---- */
-  .chart-grid{ display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
-  @media (max-width: 760px){ .chart-grid{ grid-template-columns: 1fr; } }
   .chart-card{ border: 1px solid var(--line); border-radius: 10px; background: var(--bg-raised); padding: 22px 22px 10px; }
   .chart-card h3{ font-size: 14px; margin: 0 0 2px; font-weight: 600; }
   .chart-card .chart-unit{ font-size: 12px; color: var(--text-faint); font-family: var(--mono); margin: 0 0 16px; }
@@ -191,6 +189,15 @@
   .bar-row rect{ transition: opacity .12s; }
   .bar-row:hover rect.fill{ opacity: .82; }
   .axis-line{ stroke: var(--line); stroke-width: 1; }
+
+  .scatter-grid{ stroke: var(--line-soft); stroke-width: 1; }
+  .scatter-axis text{ fill: var(--text-faint); font-family: var(--mono); font-size: 11px; }
+  .scatter-axis-title{ fill: var(--text-faint); font-family: var(--mono); font-size: 11px; }
+  .scatter-point circle{ fill: #3c5860; stroke: var(--bg-raised); stroke-width: 2; transition: r .12s; }
+  .scatter-point text{ fill: var(--text-dim); font-family: var(--mono); font-size: 12px; }
+  .scatter-point:hover circle{ r: 9; }
+  .scatter-point.hl circle{ fill: var(--accent); }
+  .scatter-point.hl text{ fill: var(--accent); font-weight: 600; }
 
   table.metrics{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 30px; }
   table.metrics caption{ text-align: left; font-family: var(--mono); font-size: 12px; color: var(--text-faint); margin-bottom: 10px; }
@@ -325,17 +332,10 @@
       ablacije i mjerenja na drugom GPU-u — u <code>captures/metrics/summary.md</code>.
     </p>
 
-    <div class="chart-grid">
-      <div class="chart-card">
-        <h3>PSNR naspram native reference</h3>
-        <p class="chart-unit">decibeli, više je bolje</p>
-        <svg id="chartPsnr" viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
-      <div class="chart-card">
-        <h3>Propusnost (GPU-bound)</h3>
-        <p class="chart-unit">okviri u sekundi, Sponza @ 1080p izlaz</p>
-        <svg id="chartFps" viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet"></svg>
-      </div>
+    <div class="chart-card">
+      <h3>Kvaliteta naspram brzine</h3>
+      <p class="chart-unit">PSNR (dB, više = bliže native) naspram FPS (GPU-bound) — gore-desno je bolje na oba mjerila</p>
+      <svg id="chartScatter" viewBox="0 0 900 420" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
 
     <div class="table-wrap">
@@ -536,15 +536,72 @@
     });
   }
 
-  var sorted = rows.slice().sort(function(a,b){ return b.psnr - a.psnr; });
-  barChart(document.getElementById("chartPsnr"),
-    sorted.map(function(r){ return { name: r.name, value: r.psnr, hl: r.hl }; }),
-    { min: 30, fmt: function(v){ return v.toFixed(1) + " dB"; } });
+  // ---- quality-vs-speed scatter ----
+  function scatterChart(svgEl, points){
+    var W = 900, H = 420, ml = 58, mr = 24, mt = 20, mb = 44;
+    var plotW = W - ml - mr, plotH = H - mt - mb;
+    var xMin = 2000, xMax = 4400, yMin = 31, yMax = 36;
 
-  var sortedFps = rows.slice().sort(function(a,b){ return b.fps - a.fps; });
-  barChart(document.getElementById("chartFps"),
-    sortedFps.map(function(r){ return { name: r.name, value: r.fps, hl: r.hl }; }),
-    { fmt: function(v){ return v.toLocaleString("hr-HR"); } });
+    var svgNS = "http://www.w3.org/2000/svg";
+    function el(tag, attrs){
+      var e = document.createElementNS(svgNS, tag);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+    function px(fps){ return ml + (fps - xMin) / (xMax - xMin) * plotW; }
+    function py(psnr){ return mt + plotH - (psnr - yMin) / (yMax - yMin) * plotH; }
+
+    // gridlines + axis ticks
+    for (var yv = yMin; yv <= yMax; yv++) {
+      var gy = py(yv);
+      svgEl.appendChild(el("line", { class: "scatter-grid", x1: ml, y1: gy, x2: ml + plotW, y2: gy }));
+      var yl = el("text", { class: "scatter-axis", x: ml - 10, y: gy + 4, "text-anchor": "end" });
+      yl.textContent = yv + " dB";
+      svgEl.appendChild(yl);
+    }
+    for (var xv = xMin; xv <= xMax; xv += 500) {
+      var gx = px(xv);
+      svgEl.appendChild(el("line", { class: "scatter-grid", x1: gx, y1: mt, x2: gx, y2: mt + plotH }));
+      var xl = el("text", { class: "scatter-axis", x: gx, y: mt + plotH + 20, "text-anchor": "middle" });
+      xl.textContent = xv.toLocaleString("hr-HR");
+      svgEl.appendChild(xl);
+    }
+    var xTitle = el("text", { class: "scatter-axis-title", x: ml + plotW / 2, y: H - 4, "text-anchor": "middle" });
+    xTitle.textContent = "FPS (GPU-bound, veće = brže) →";
+    svgEl.appendChild(xTitle);
+    var yTitle = el("text", { class: "scatter-axis-title", x: -(mt + plotH / 2), y: 16, "text-anchor": "middle",
+                               transform: "rotate(-90)" });
+    yTitle.textContent = "PSNR vs. native (dB, veće = bliže) →";
+    svgEl.appendChild(yTitle);
+
+    points.forEach(function(p){
+      var cx = px(p.fps), cy = py(p.psnr);
+      var g = el("g", { class: "scatter-point" + (p.hl ? " hl" : "") });
+      g.appendChild(el("circle", { cx: cx, cy: cy, r: 6 }));
+      var label = el("text", { x: cx, y: cy + p.dy, "text-anchor": p.anchor });
+      label.textContent = p.label;
+      g.appendChild(label);
+      var title = el("title", {});
+      title.textContent = p.name + ": " + p.psnr.toFixed(2) + " dB, " + p.fps.toLocaleString("hr-HR") + " fps";
+      g.appendChild(title);
+      svgEl.appendChild(g);
+    });
+  }
+
+  var labelMeta = {
+    "Nearest":              { label: "Nearest",    dy: -14, anchor: "end" },
+    "Bilinear":             { label: "Bilinear",   dy: -14, anchor: "end" },
+    "Bicubic":              { label: "Bicubic",    dy: 20,  anchor: "end" },
+    "FSR1 EASU+RCAS":       { label: "FSR1",       dy: -14, anchor: "middle" },
+    "TAAU":                 { label: "TAAU",       dy: 20,  anchor: "middle" },
+    "TAAU + RCAS":          { label: "TAAU+RCAS",  dy: -14, anchor: "middle" },
+    "FSR (M5)":             { label: "FSR",        dy: -14, anchor: "start" },
+    "FSR + RCAS (M5)":      { label: "FSR+RCAS ★", dy: 20,  anchor: "start" }
+  };
+  scatterChart(document.getElementById("chartScatter"), rows.map(function(r){
+    var m = labelMeta[r.name];
+    return { name: r.name, psnr: r.psnr, fps: r.fps, hl: r.hl, label: m.label, dy: m.dy, anchor: m.anchor };
+  }));
 
   var cost = [
     { name: "960×540 (samo render)",  value: 0.14 },

@@ -19,7 +19,7 @@ PSNR na sedam od osam, za +0,03 do +0,20 dB (1080p Quality: 35,00 → 35,10 dB).
 Dobitak je stabilan preko tri sjemena, ali malen, ne popravlja sustavno najgori
 okvir i ne prenosi se na neviđenu scenu. Plaća se ~1,1 ms GPU-a po okviru na
 1080p (generiranje okvira 0,33 → 1,40 ms), što pri sintetskom opterećenju ×12
-spušta prikazani FPS s 329 na 290 i dodaje ~0,8 ms latencije. **Ni na kartici s
+spušta prikazani FPS s 309 na 273 i dodaje ~1,2 ms latencije. **Ni na kartici s
 Tensor Core jedinicama se ne isplati, jer ih naša implementacija namjerno ne
 koristi**: heuristika je 0,10 dB lošija za manje od četvrtine cijene
 generiranja okvira (0,33 naspram 1,40 ms). Vrijedi kao izmjeren odgovor na
@@ -379,15 +379,15 @@ je i c4-c8 skoro dvostruko skuplji od cijele heuristike.
 
 | Opterećenje | bez FG | FG, heuristika | FG, mreža | latencija do pravog okvira (heur. / mreža) |
 |---|---|---|---|---|
-| ×0 | 1058 fps | 1090 fps | 708 fps | 2,0 / 3,0 ms |
-| ×12 | 199 fps | 329 fps | 290 fps | 6,2 / 7,0 ms |
-| ×24 | 116 fps | 209 fps | 188 fps | 9,7 / 10,8 ms |
+| ×0 | 1011 fps | 1151 fps | 722 fps | 2,4 / 3,9 ms |
+| ×12 | 188 fps | 309 fps | 273 fps | 9,6 / 10,8 ms |
+| ×24 | 111 fps | 194 fps | 174 fps | 15,3 / 17,1 ms |
 
-Uz opterećenje generiranje okvira s mrežom i dalje diže FPS (×12: +46 % naspram
-bez FG-a), ali heuristika ga diže više (+66 %). Na neopterećenoj sceni mreža
-pomiče prag isplativosti: FG s njom gubi gotovo trećinu FPS-a (1058 → 708 fps),
+Uz opterećenje generiranje okvira s mrežom i dalje diže FPS (×12: +45 % naspram
+bez FG-a), ali heuristika ga diže više (+64 %). Na neopterećenoj sceni mreža
+pomiče prag isplativosti: FG s njom gubi gotovo trećinu FPS-a (1011 → 722 fps),
 dok heuristika na ovoj kartici nema trošak vidljiv u prikazanom FPS-u
-(1058 → 1090 fps) — na brzom GPU-u je stvarni okvir toliko jeftin da
+(1011 → 1151 fps) — na brzom GPU-u je stvarni okvir toliko jeftin da
 naizmjenično umetanje jeftinih generiranih okvira poveća broj prikaza, ne
 smanji ga; to je vidljivo tek kad je generirani okvir sam skup, kao kod mreže.
 
@@ -396,8 +396,8 @@ smanji ga; to je vidljivo tek kad je generirani okvir sam skup, kao kod mreže.
 Ne bitno bolje ni na kartici s Tensor Core jedinicama koje naša implementacija
 namjerno ne koristi, i to je izmjereno, a ne pretpostavljeno: +0,10 dB na
 1080p Quality je razlika koju tablica vidi, a oko teško, dok generiranje
-okvira raste s 0,33 na 1,40 ms i pri ×12 prikazani FPS pada s 329
-(heuristika) na 290 (mreža). Apsolutni trošak je niži nego na sporijem GPU-u
+okvira raste s 0,33 na 1,40 ms i pri ×12 prikazani FPS pada s 309
+(heuristika) na 273 (mreža). Apsolutni trošak je niži nego na sporijem GPU-u
 (1,1 ms naspram nekadašnjih 2,7 ms), ali razlog nije nestao: FSR3-lite je
 namjerno pisan prenosivo, u općim OpenGL compute shaderima, pa `mat4`
 operacije mreže (`shaders/ml_conv.comp`) troše obične ALU jedinice, ne

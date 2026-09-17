@@ -218,11 +218,16 @@ bool FramePacer::waitUntil(double targetMs) {
             if (!queue_.empty()) return true;
         }
         const double left = targetMs - now;
-        // A sleep overshoots by up to a millisecond or so; sleep most of the
-        // way and yield through the rest.
-        if (left > 2.0)
-            std::this_thread::sleep_for(
-                std::chrono::microseconds(static_cast<long long>((left - 1.5) * 1000.0)));
+        // sleep_for() is not precise enough for this: measured overshoot on
+        // this toolchain's Windows sleep is ~10-13 ms even for a ~1-2 ms
+        // request (a scheduler-tick rounding that `timeBeginPeriod(1)` in
+        // start() does not fully remove), which is most of a half-period
+        // wait at any load this module is measured at. Only reach for a
+        // sleep on waits long enough that the same overshoot is a rounding
+        // error rather than the whole wait, and spin the rest -- this is a
+        // dedicated thread, and precision here is the entire point of it.
+        if (left > 30.0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(left - 15.0)));
         else
             std::this_thread::yield();
     }

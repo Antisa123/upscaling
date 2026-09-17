@@ -2,14 +2,14 @@
 [gltf] C:/Users/Korisnik/Desktop/a/assets/sponza/Sponza.gltf: 103 meshes, 103 instances, 25 textures
 [app] keys: 1-9 debug views | 0 interpolated frame | J jitter | P scripted path | V vsync | F1-F5 scaling mode | SPACE pause | F12 screenshot | ESC quit
 [app]       G frame generation | Y pacing | H HUD | T tear lines | [ ] synthetic load
-[gpu] G-buffer                   0.173 ms (last   0.161)
-[gpu] Synthetic load             1.334 ms (last   1.287)
-[gpu] load G-buffer              0.323 ms (last   0.322)
+[gpu] G-buffer                   0.161 ms (last   0.161)
+[gpu] Synthetic load             1.340 ms (last   1.288)
+[gpu] load G-buffer              0.332 ms (last   0.323)
 [gpu] Tonemap                    0.015 ms (last   0.015)
-[gpu] FSR dilate                 0.047 ms (last   0.038)
-[gpu] FSR locks                  0.013 ms (last   0.013)
-[gpu] FSR accumulate             0.143 ms (last   0.136)
-[gpu] Present                    0.026 ms (last   0.022)
-[gpu] TOTAL                      1.750 ms (last   1.671)
-[present] 2937 presents (2937 real, 0 generated)  interval mean 2.709 ms (369.1 fps)  std 0.345 ms  p99 3.833 ms
-[present] latency sample -> real frame 2.89 ms
+[gpu] FSR dilate                 0.038 ms (last   0.038)
+[gpu] FSR locks                  0.037 ms (last   0.013)
+[gpu] FSR accumulate             0.137 ms (last   0.136)
+[gpu] Present                    0.022 ms (last   0.022)
+[gpu] TOTAL                      1.750 ms (last   1.673)
+[present] 2840 presents (2840 real, 0 generated)  interval mean 2.800 ms (357.2 fps)  std 0.386 ms  p99 3.635 ms
+[present] latency sample -> real frame 2.98 ms
